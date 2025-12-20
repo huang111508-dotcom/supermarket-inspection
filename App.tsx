@@ -1,12 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
-import { InspectionData, ViewState, Areas, AreaData, Deduction, EmployeeConfig, InspectionRecord } from './types';
+import { InspectionData, ViewState, Deduction, EmployeeConfig, InspectionRecord } from './types';
 import { INITIAL_AREAS, INITIAL_EMPLOYEES } from './data';
 import { exportToExcel } from './utils/excelExport';
 
 // Firebase Imports
 import { db } from './firebaseConfig';
-import { collection, addDoc, query, where, onSnapshot, deleteDoc, doc, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, query, where, onSnapshot, deleteDoc, doc, orderBy } from 'firebase/firestore';
 
 const App: React.FC = () => {
     // Helper to get current month string "YYYY-MM"
