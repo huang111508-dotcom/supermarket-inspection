@@ -1,7 +1,7 @@
 
 // Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
-import { getFirestore, enableIndexedDbPersistence } from "firebase/firestore";
+import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: "AIzaSyD3rFKvIxxoug4k4_8VrenGfHNu-cQdX8Q",
@@ -18,14 +18,4 @@ const app = initializeApp(firebaseConfig);
 // Initialize Firestore
 export const db = getFirestore(app);
 
-// Enable Offline Persistence
-// Note: This might throw errors in some environments (like server-side rendering), so we catch them.
-enableIndexedDbPersistence(db).catch((err) => {
-    if (err.code == 'failed-precondition') {
-        // Multiple tabs open, persistence can only be enabled in one tab at a a time.
-        console.warn("Firebase persistence failed: multiple tabs open");
-    } else if (err.code == 'unimplemented') {
-        // The current browser does not support all of the features required to enable persistence
-        console.warn("Firebase persistence not supported by this browser");
-    }
-});
+// Note: Offline persistence has been disabled to ensure multi-device synchronization is always fresh.

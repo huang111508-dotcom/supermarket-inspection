@@ -79,16 +79,28 @@ const App: React.FC = () => {
         const docRef = doc(db, "config", "employees");
         
         // Listen to the document in real-time
-        const unsubscribe = onSnapshot(docRef, (docSnap) => {
+        // Added includeMetadataChanges to debug potential caching issues if needed, though persistence is off now.
+        const unsubscribe = onSnapshot(docRef, { includeMetadataChanges: true }, (docSnap) => {
             setSyncStatus('connected');
             if (docSnap.exists()) {
-                console.log("Employees synced from cloud.");
-                setEmployees(docSnap.data() as EmployeeConfig);
+                const cloudData = docSnap.data() as EmployeeConfig;
+                console.log("Employees synced from cloud.", cloudData);
+                
+                // Merge with INITIAL_EMPLOYEES to ensure all keys exist even if cloud doc is partial
+                // Cloud data takes precedence
+                const mergedEmployees = { ...INITIAL_EMPLOYEES, ...cloudData };
+                
+                // Specifically ensure arrays are arrays (defensive coding)
+                Object.keys(mergedEmployees).forEach(key => {
+                    if (!Array.isArray(mergedEmployees[key])) {
+                        mergedEmployees[key] = [];
+                    }
+                });
+
+                setEmployees(mergedEmployees);
             } else {
-                console.log("No config found in cloud via snapshot. Checking logic...");
-                // Only write defaults if we are sure it's empty (handled by a separate check or user action usually, 
-                // but for simplicity we init here if missing).
-                // Use a transactional style check effectively by just setting it if missing.
+                console.log("No config found in cloud via snapshot. Initializing...");
+                // Initialize if missing
                 setDoc(docRef, INITIAL_EMPLOYEES).catch(e => {
                     console.error("Failed to initialize config in cloud:", e);
                 });
@@ -97,7 +109,7 @@ const App: React.FC = () => {
             console.error("Sync Error (Employees):", error);
             setSyncStatus('error');
             if (error.code === 'permission-denied') {
-               alert("警告：无法从云端加载员工名单 (Permission Denied)。");
+               alert("警告：无法从云端加载员工名单 (Permission Denied)。请联系管理员检查数据库权限。");
             }
         });
 
@@ -359,7 +371,7 @@ const App: React.FC = () => {
                     title="需要管理员密码"
                 >
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.157.945c.03.18.158.322.336.37.587.159 1.144.398 1.663.708.163.097.362.073.498-.06l.732-.71c.408-.396 1.05-.407 1.465-.02l.772.716c.42.389.467 1.033.106 1.47l-.54.654c-.118.143-.133.344-.04.512.277.514.475 1.057.586 1.628.035.18.175.31.358.323l.913.063c.556.038.99.492.99 1.048v1.074c0 .556-.434 1.01-.99 1.048l-.913.063c-.183.013-.323.143-.358.323a8.18 8.18 0 01-.586 1.628c-.093.168-.078.37.04.512l.54.654c.36.437.314 1.08-.106 1.47l-.772.716c-.415.387-1.057.376-1.465-.02l-.732-.71c-.136-.132-.335-.157-.498-.06a8.154 8.154 0 01-1.663.708c-.178.048-.306.19-.336.37l-.157.945c-.09.542-.56.94-1.11.94h-1.094c-.55 0-1.02-.398-1.11-.94l-.157-.945c-.03-.18-.158-.322-.336-.37a8.16 8.16 0 01-1.663-.708c-.163-.097-.362-.073-.498.06l-.732.71c-.408.396-1.05.407-1.465.02l-.772-.716c-.42-.389-.467-1.033-.106-1.47l.54-.654c.118-.143.133-.344.04-.512a8.18 8.18 0 01-.586-1.628c-.035-.18-.175-.31-.358-.323l-.913-.063c-.556-.038-.99-.492-.99-1.048v-1.074c0-.556.434-1.01.99-1.048l.913-.063c.183-.013.323-.143.358-.323.111-.57.31-1.114.586-1.628.093-.168.078-.37-.04-.512l-.54-.654c-.36-.437-.314-1.08.106-1.47l.772-.716c.415-.387 1.057-.376 1.465.02l.732.71c.136.132.335.157.498.06.52-.31 1.076-.55 1.663-.708.178-.048.306-.19.336-.37l.157-.945z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.157.945c.03.18.158.322.336.37.587.159 1.144.398 1.663.708.163.097.362.073.498-.06l.732-.71c.408-.396 1.05-.407 1.465-.02l.772.716c.42.389.467 1.033.106 1.47l-.54.654c-.118.143-.133.344-.04.512.277.514.475 1.057.586 1.628.035.18.175.31.358.323l.913.063c.556.038.99.492.99 1.048v1.074c0 .556-.434 1.01-.99 1.048l-.913.063c-.183.013-.323.143-.358.323a8.18 8.18 0 01-.586 1.628c-.093.168-.078.37.04.512l.54.654c.36.437.314 1.08-.106 1.47l-.772.716c-.415.387-1.057.376-1.465-.02l-.732-.71c-.136-.132-.335-.157-.498-.06a8.154 8.154 0 01-1.663.708c-.178.048-.306.19-.336.37l-.157.945z" />
                         <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
                     人员管理
