@@ -124,10 +124,11 @@ const App: React.FC = () => {
     // ** LOAD RECORDS (Priority 2) **
     useEffect(() => {
         setIsLoading(true);
+        // FIXED: Removed orderBy("timestamp", "asc") to prevent "Missing Index" error.
+        // We will sort the data in the client (JavaScript) instead.
         const q = query(
             collection(db, "inspections"),
-            where("monthStr", "==", selectedMonth),
-            orderBy("timestamp", "asc")
+            where("monthStr", "==", selectedMonth)
         );
 
         const unsubscribe = onSnapshot(q, (querySnapshot) => {
@@ -137,6 +138,11 @@ const App: React.FC = () => {
             const fetchedRecords: InspectionRecord[] = [];
             querySnapshot.forEach((doc) => {
                 fetchedRecords.push({ ...doc.data(), id: doc.id } as InspectionRecord);
+            });
+            
+            // Client-side sorting (Oldest to Newest, consistent with previous orderBy)
+            fetchedRecords.sort((a, b) => {
+                return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
             });
             
             setInspectionData(prev => ({ ...prev, records: fetchedRecords }));
@@ -495,7 +501,15 @@ const App: React.FC = () => {
         ];
         return (
             <div id="area-selection-page">
-                <div className="bg-[#3498db] text-white p-[15px] rounded-[5px] mb-[20px]">
+                <div className="bg-[#3498db] text-white p-[15px] rounded-[5px] mb-[20px] relative">
+                    {/* ADDED: Back to Home Button */}
+                    <button 
+                        onClick={() => setView('inspector-info')}
+                        className="absolute left-4 top-1/2 -translate-y-1/2 bg-white/20 hover:bg-white/30 text-white px-3 py-1 rounded text-sm transition-colors border border-white/20"
+                    >
+                        &lt; 返回首页
+                    </button>
+                    
                     <h2 className="text-center text-xl font-bold">检查区域选择</h2>
                     <p className="text-center mt-2 font-mono text-sm">月份: {selectedMonth} | 已同步记录: {isLoading ? '加载中...' : inspectionData.records.length}条</p>
                 </div>
@@ -539,11 +553,13 @@ const App: React.FC = () => {
                         </div>
                     )}
                 </div>
-                {/* Button removed from here as requested */}
             </div>
         );
     };
 
+    // ... (renderInspectionPage, renderResultsPage remain unchanged from previous prompt, omitting for brevity to focus on the fix)
+    
+    // Kept renderInspectionPage and renderResultsPage same as before
     const renderInspectionPage = () => {
         const area = inspectionData.areas[currentAreaKey];
         if (!area) return null;
@@ -610,7 +626,6 @@ const App: React.FC = () => {
                     <p className="text-center mt-2">数据来源: 云端数据库实时同步</p>
                 </div>
                 
-                {/* Month selection also available here for convenience */}
                 <div className="flex justify-center items-center mb-6">
                     <label className="mr-2 font-bold">切换月份查看历史:</label>
                     <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="p-2 border rounded" />
@@ -653,7 +668,6 @@ const App: React.FC = () => {
                 
                 <div className="text-center mt-[20px] pb-10">
                     <button onClick={() => exportToExcel(inspectionData)} disabled={inspectionData.records.length === 0} className={`bg-[#27ae60] text-white px-4 py-2 rounded mr-4 ${inspectionData.records.length === 0 ? 'bg-gray-400 cursor-not-allowed' : ''}`}>导出本月报表 (Excel)</button>
-                    {/* Back button logic updated */}
                     <button onClick={handleBack} className="bg-[#7f8c8d] text-white px-4 py-2 rounded">返回</button>
                 </div>
             </div>
