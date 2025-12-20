@@ -14,7 +14,6 @@ import {
     onSnapshot, 
     deleteDoc, 
     doc, 
-    orderBy, 
     setDoc, 
     updateDoc, 
     arrayUnion, 
@@ -557,9 +556,6 @@ const App: React.FC = () => {
         );
     };
 
-    // ... (renderInspectionPage, renderResultsPage remain unchanged from previous prompt, omitting for brevity to focus on the fix)
-    
-    // Kept renderInspectionPage and renderResultsPage same as before
     const renderInspectionPage = () => {
         const area = inspectionData.areas[currentAreaKey];
         if (!area) return null;
