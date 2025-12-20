@@ -1,0 +1,5 @@
+{
+  "name": "Supermarket Inspection System",
+  "description": "A supermarket store inspection and scoring system covering various departments like vegetables, grocery, seafood, meat, deli, and cashier.",
+  "requestFramePermissions": []
+}
