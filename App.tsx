@@ -6,7 +6,7 @@ import { exportToExcel } from './utils/excelExport';
 
 // Firebase Imports
 import { db } from './firebaseConfig';
-import { collection, addDoc, query, where, onSnapshot, deleteDoc, doc, orderBy } from 'firebase/firestore';
+import { collection, addDoc, query, where, onSnapshot, deleteDoc, doc, orderBy, setDoc, getDoc } from 'firebase/firestore';
 
 const App: React.FC = () => {
     // Helper to get current month string "YYYY-MM"
@@ -56,6 +56,29 @@ const App: React.FC = () => {
                              String(now.getMinutes()).padStart(2, '0');
         
         setInspectionData(prev => ({ ...prev, date: formattedDate }));
+    }, []);
+
+    // **NEW**: Load Employees from Cloud on Start
+    useEffect(() => {
+        const loadEmployees = async () => {
+            try {
+                const docRef = doc(db, "config", "employees");
+                const docSnap = await getDoc(docRef);
+                
+                if (docSnap.exists()) {
+                    // If cloud config exists, use it
+                    setEmployees(docSnap.data() as EmployeeConfig);
+                } else {
+                    // If not (first run), save the INITIAL_EMPLOYEES to cloud so we have a base
+                    await setDoc(docRef, INITIAL_EMPLOYEES);
+                    // No need to setEmployees as it's already initialized with INITIAL_EMPLOYEES
+                }
+            } catch (e) {
+                console.error("Error loading employee config:", e);
+                // Fail silently to default list, or alert user
+            }
+        };
+        loadEmployees();
     }, []);
 
     // **NEW**: Firebase Real-time Listener based on Selected Month
@@ -229,22 +252,47 @@ const App: React.FC = () => {
         }
     };
     
-    // Management Actions
-    const handleAddEmployee = () => {
+    // Management Actions - UPDATED with Persistence
+    const handleAddEmployee = async () => {
         if (!newEmployeeName.trim()) return;
-        setEmployees(prev => ({
-            ...prev,
-            [manageAreaKey]: [...(prev[manageAreaKey] || []), newEmployeeName.trim()]
-        }));
+        
+        const updatedList = [...(employees[manageAreaKey] || []), newEmployeeName.trim()];
+        const updatedEmployees = {
+            ...employees,
+            [manageAreaKey]: updatedList
+        };
+
+        // 1. Optimistic Update (Update UI immediately)
+        setEmployees(updatedEmployees);
         setNewEmployeeName('');
+
+        // 2. Persist to Cloud
+        try {
+            await setDoc(doc(db, "config", "employees"), updatedEmployees);
+        } catch (e) {
+            console.error("Error saving employee to cloud:", e);
+            alert("保存员工失败，请检查网络 (Failed to save to cloud)");
+        }
     };
 
-    const handleDeleteEmployee = (nameToDelete: string) => {
+    const handleDeleteEmployee = async (nameToDelete: string) => {
         if (window.confirm(`确定要删除员工 ${nameToDelete} 吗？`)) {
-            setEmployees(prev => ({
-                ...prev,
-                [manageAreaKey]: prev[manageAreaKey].filter(name => name !== nameToDelete)
-            }));
+            const updatedList = employees[manageAreaKey].filter(name => name !== nameToDelete);
+            const updatedEmployees = {
+                ...employees,
+                [manageAreaKey]: updatedList
+            };
+
+            // 1. Optimistic Update
+            setEmployees(updatedEmployees);
+
+            // 2. Persist to Cloud
+            try {
+                await setDoc(doc(db, "config", "employees"), updatedEmployees);
+            } catch (e) {
+                console.error("Error deleting employee from cloud:", e);
+                alert("删除同步失败，请检查网络 (Failed to sync deletion)");
+            }
         }
     };
 

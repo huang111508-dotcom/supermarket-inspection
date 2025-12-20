@@ -1,5 +1,5 @@
 // Import the functions you need from the SDKs you need
-import { initializeApp } from "firebase/app";
+import * as firebaseApp from "firebase/app";
 import { getFirestore, enableIndexedDbPersistence } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -12,7 +12,8 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-const app = initializeApp(firebaseConfig);
+// Cast to any to handle potential type definition mismatches where initializeApp is not recognized
+const app = (firebaseApp as any).initializeApp(firebaseConfig);
 
 // Initialize Firestore
 export const db = getFirestore(app);
