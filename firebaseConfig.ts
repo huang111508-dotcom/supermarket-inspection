@@ -1,4 +1,3 @@
-
 // Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
 import { getFirestore, enableIndexedDbPersistence } from "firebase/firestore";
@@ -14,12 +13,11 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
+
 // Initialize Firestore
 export const db = getFirestore(app);
 
 // Enable Offline Persistence
-// This allows the app to work offline and syncs data when online,
-// and significantly speeds up the "write" perception in the UI.
 enableIndexedDbPersistence(db).catch((err) => {
     if (err.code == 'failed-precondition') {
         // Multiple tabs open, persistence can only be enabled in one tab at a a time.
