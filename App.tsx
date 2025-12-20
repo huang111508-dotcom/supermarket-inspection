@@ -18,8 +18,7 @@ import {
     setDoc, 
     updateDoc, 
     arrayUnion, 
-    arrayRemove,
-    getDoc 
+    arrayRemove
 } from 'firebase/firestore';
 
 const App: React.FC = () => {
