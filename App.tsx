@@ -39,6 +39,9 @@ const App: React.FC = () => {
     const [employees, setEmployees] = useState<EmployeeConfig>({});
     const [isEmployeesLoaded, setIsEmployeesLoaded] = useState<boolean>(false);
     
+    // Auth State
+    const [isAdmin, setIsAdmin] = useState<boolean>(false);
+    
     // UI State
     const [view, setView] = useState<ViewState>('inspector-info');
     // New state to track where we came from (to handle "Back" button correctly)
@@ -325,15 +328,33 @@ const App: React.FC = () => {
     };
 
     const handleDeleteRecord = async (recordId: string) => {
-        if(window.confirm("确定要删除这条云端检查记录吗？")) {
+        // PERMISSION CHECK
+        if (!isAdmin) {
+            const password = window.prompt("⚠️ 权限验证\n\n删除历史记录需要管理员权限，请输入密码:");
+            if (password === 'admin888') {
+                setIsAdmin(true); // Grant admin privileges for this session
+            } else {
+                if (password !== null) alert("❌ 密码错误，权限不足，无法删除！");
+                return;
+            }
+        }
+
+        if(window.confirm("确定要永久删除这条云端检查记录吗？此操作无法撤销。")) {
             try { await deleteDoc(doc(db, "inspections", recordId)); } 
             catch (e) { alert("删除失败"); }
         }
     };
 
     const handleAccessManagement = () => {
+        if (isAdmin) {
+            setView('management');
+            return;
+        }
         const password = window.prompt("请输入管理员密码:");
-        if (password === 'admin888') setView('management');
+        if (password === 'admin888') {
+            setIsAdmin(true);
+            setView('management');
+        }
         else if (password !== null) alert("密码错误！");
     };
 
