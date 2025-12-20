@@ -6,7 +6,7 @@ import { exportToExcel } from './utils/excelExport';
 
 // Firebase Imports
 import { db } from './firebaseConfig';
-import { collection, addDoc, query, where, onSnapshot, deleteDoc, doc, orderBy, setDoc, getDoc } from 'firebase/firestore';
+import { collection, addDoc, query, where, onSnapshot, deleteDoc, doc, orderBy, setDoc } from 'firebase/firestore';
 
 const App: React.FC = () => {
     // Helper to get current month string "YYYY-MM"
@@ -58,27 +58,32 @@ const App: React.FC = () => {
         setInspectionData(prev => ({ ...prev, date: formattedDate }));
     }, []);
 
-    // **NEW**: Load Employees from Cloud on Start
+    // **NEW**: Load Employees from Cloud using onSnapshot (Real-time Sync)
     useEffect(() => {
-        const loadEmployees = async () => {
-            try {
-                const docRef = doc(db, "config", "employees");
-                const docSnap = await getDoc(docRef);
-                
-                if (docSnap.exists()) {
-                    // If cloud config exists, use it
-                    setEmployees(docSnap.data() as EmployeeConfig);
-                } else {
-                    // If not (first run), save the INITIAL_EMPLOYEES to cloud so we have a base
-                    await setDoc(docRef, INITIAL_EMPLOYEES);
-                    // No need to setEmployees as it's already initialized with INITIAL_EMPLOYEES
-                }
-            } catch (e) {
-                console.error("Error loading employee config:", e);
-                // Fail silently to default list, or alert user
+        const docRef = doc(db, "config", "employees");
+        
+        // Listen to the document in real-time
+        const unsubscribe = onSnapshot(docRef, (docSnap) => {
+            if (docSnap.exists()) {
+                console.log("Employees synced from cloud.");
+                setEmployees(docSnap.data() as EmployeeConfig);
+            } else {
+                console.log("No config found in cloud, initializing with defaults...");
+                // If the document doesn't exist yet, create it with initial data
+                setDoc(docRef, INITIAL_EMPLOYEES).catch(e => {
+                    console.error("Failed to initialize config in cloud:", e);
+                });
             }
-        };
-        loadEmployees();
+        }, (error) => {
+            console.error("Sync Error (Employees):", error);
+            // If we can't read from cloud (e.g. permission error), we keep the initial state.
+            // You might want to alert the user here if needed.
+            if (error.code === 'permission-denied') {
+               alert("警告：无法从云端加载员工名单 (Permission Denied)。请检查数据库规则。");
+            }
+        });
+
+        return () => unsubscribe();
     }, []);
 
     // **NEW**: Firebase Real-time Listener based on Selected Month
@@ -106,8 +111,6 @@ const App: React.FC = () => {
         }, (error) => {
             console.error("Error fetching documents: ", error);
             setIsLoading(false);
-            // Fallback implies permission issues or config issues
-            // alert("无法连接云端数据库，请检查网络或配置 (Error connecting to Firestore).");
         });
 
         // Cleanup subscription on unmount or month change
@@ -252,26 +255,30 @@ const App: React.FC = () => {
         }
     };
     
-    // Management Actions - UPDATED with Persistence
+    // Management Actions - UPDATED: Rely on Cloud State
     const handleAddEmployee = async () => {
         if (!newEmployeeName.trim()) return;
         
-        const updatedList = [...(employees[manageAreaKey] || []), newEmployeeName.trim()];
+        const currentList = employees[manageAreaKey] || [];
+        // Prevent duplicates strictly? Or allow same name? Better to allow for now or simple check.
+        const updatedList = [...currentList, newEmployeeName.trim()];
+        
         const updatedEmployees = {
             ...employees,
             [manageAreaKey]: updatedList
         };
 
-        // 1. Optimistic Update (Update UI immediately)
-        setEmployees(updatedEmployees);
-        setNewEmployeeName('');
-
-        // 2. Persist to Cloud
+        // We DO NOT setEmployees here manually. 
+        // We setDoc, and let the onSnapshot listener update the UI.
+        // This confirms to the user that the data is actually being synced.
+        
         try {
+            // Use setDoc to overwrite/merge the config document
             await setDoc(doc(db, "config", "employees"), updatedEmployees);
-        } catch (e) {
+            setNewEmployeeName(''); // Clear input on success (or optimistic success)
+        } catch (e: any) {
             console.error("Error saving employee to cloud:", e);
-            alert("保存员工失败，请检查网络 (Failed to save to cloud)");
+            alert("保存员工失败 (Failed to save): " + e.message);
         }
     };
 
@@ -283,15 +290,11 @@ const App: React.FC = () => {
                 [manageAreaKey]: updatedList
             };
 
-            // 1. Optimistic Update
-            setEmployees(updatedEmployees);
-
-            // 2. Persist to Cloud
             try {
                 await setDoc(doc(db, "config", "employees"), updatedEmployees);
-            } catch (e) {
+            } catch (e: any) {
                 console.error("Error deleting employee from cloud:", e);
-                alert("删除同步失败，请检查网络 (Failed to sync deletion)");
+                alert("删除失败 (Failed to delete): " + e.message);
             }
         }
     };
