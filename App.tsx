@@ -37,7 +37,10 @@ const App: React.FC = () => {
         records: [] // Store completed records here
     }));
 
-    const [employees, setEmployees] = useState<EmployeeConfig>(INITIAL_EMPLOYEES);
+    // CRITICAL CHANGE: Initialize as empty object. Do NOT use INITIAL_EMPLOYEES locally.
+    // This forces the UI to wait for Cloud Data, preventing stale local data from appearing.
+    const [employees, setEmployees] = useState<EmployeeConfig>({});
+    const [isEmployeesLoaded, setIsEmployeesLoaded] = useState<boolean>(false);
     
     // UI State
     const [view, setView] = useState<ViewState>('inspector-info');
@@ -53,13 +56,13 @@ const App: React.FC = () => {
     const [manageAreaKey, setManageAreaKey] = useState<string>('vegetables');
     const [newEmployeeName, setNewEmployeeName] = useState<string>('');
 
-    // **NEW**: Month Selection for History/Archiving
+    // Month Selection for History/Archiving
     const [selectedMonth, setSelectedMonth] = useState<string>(getCurrentMonthStr());
     const [isLoading, setIsLoading] = useState<boolean>(false);
-    // **NEW**: Submitting state for feedback
+    // Submitting state for feedback
     const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
     
-    // **NEW**: Connection Status
+    // Connection Status
     const [syncStatus, setSyncStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');
 
     // Initialize Date string for the form
@@ -74,79 +77,72 @@ const App: React.FC = () => {
         setInspectionData(prev => ({ ...prev, date: formattedDate }));
     }, []);
 
-    // **NEW**: Load Employees from Cloud using onSnapshot (Real-time Sync) with Atomic Init Check
+    // **OPTIMIZED**: Load Employees from Cloud (Absolute Truth)
     useEffect(() => {
         const docRef = doc(db, "config", "employees");
         
-        // Listen to the document in real-time
-        const unsubscribe = onSnapshot(docRef, { includeMetadataChanges: true }, (docSnap) => {
+        // Removed `includeMetadataChanges: true` to reduce latency perception unless necessary
+        const unsubscribe = onSnapshot(docRef, (docSnap) => {
+            // Immediate visual feedback
             setSyncStatus('connected');
+            setIsEmployeesLoaded(true);
+
             if (docSnap.exists()) {
                 const cloudData = docSnap.data() as EmployeeConfig;
-                console.log("Employees synced from cloud (Absolute Truth).", cloudData);
+                console.log("Employees synced from cloud.", cloudData);
                 
-                // CRITICAL FIX: Do NOT merge with INITIAL_EMPLOYEES.
-                // Cloud data is the absolute truth. If cloud says empty, it's empty.
-                // We only ensure the object structure exists to prevent UI errors.
-                
+                // Ensure structure exists but abide by cloud data
                 const safeData: EmployeeConfig = {};
-                
-                // 1. Create empty arrays for all known areas (to ensure keys exist)
-                Object.keys(INITIAL_AREAS).forEach(key => {
-                    safeData[key] = [];
-                });
-
-                // 2. Overwrite with actual cloud data
-                // If cloudData['vegetables'] is empty, it stays empty (deleted employees stay deleted)
+                Object.keys(INITIAL_AREAS).forEach(key => { safeData[key] = []; });
                 Object.assign(safeData, cloudData);
 
                 setEmployees(safeData);
             } else {
-                console.log("No config found in cloud. Initializing with defaults...");
-                // Only use INITIAL_EMPLOYEES if the database is completely empty (first run)
+                console.log("Database empty. Seeding defaults...");
+                // Only if DB is empty, we write the defaults ONCE.
                 setDoc(docRef, INITIAL_EMPLOYEES).catch(e => {
-                    console.error("Failed to initialize config in cloud:", e);
+                    console.error("Init failed:", e);
+                    setSyncStatus('error');
                 });
             }
         }, (error) => {
             console.error("Sync Error (Employees):", error);
             setSyncStatus('error');
+            // Check if it's a permission error
             if (error.code === 'permission-denied') {
-               alert("警告：无法从云端加载员工名单 (Permission Denied)。请联系管理员检查数据库权限。");
+                alert("严重错误：数据同步被拒绝！\n请检查 Firebase Console 中的 Firestore Rules 是否允许读写。\n(Error: permission-denied)");
             }
         });
 
         return () => unsubscribe();
     }, []);
 
-    // **NEW**: Firebase Real-time Listener based on Selected Month
+    // Firebase Real-time Listener based on Selected Month
     useEffect(() => {
         setIsLoading(true);
-        // Query: Get inspections where monthStr matches selectedMonth
         const q = query(
             collection(db, "inspections"),
             where("monthStr", "==", selectedMonth),
-            orderBy("timestamp", "asc") // Optional: order by time
+            orderBy("timestamp", "asc")
         );
 
         const unsubscribe = onSnapshot(q, (querySnapshot) => {
+            setSyncStatus('connected'); // Ensure status is green if this loads first
             const fetchedRecords: InspectionRecord[] = [];
             querySnapshot.forEach((doc) => {
                 fetchedRecords.push({ ...doc.data(), id: doc.id } as InspectionRecord);
             });
             
-            // Update local state with cloud data
-            setInspectionData(prev => ({
-                ...prev,
-                records: fetchedRecords
-            }));
+            setInspectionData(prev => ({ ...prev, records: fetchedRecords }));
             setIsLoading(false);
         }, (error) => {
-            console.error("Error fetching documents: ", error);
+            console.error("Error fetching records: ", error);
             setIsLoading(false);
+             if (error.code === 'permission-denied') {
+                 setSyncStatus('error');
+             }
         });
 
-        // Cleanup subscription on unmount or month change
         return () => unsubscribe();
     }, [selectedMonth]);
 
@@ -171,11 +167,9 @@ const App: React.FC = () => {
             return;
         }
         
-        // Update current context
         setCurrentAreaKey(selectionAreaKey);
         setCurrentEmployee(selectionEmployee);
         
-        // RESET Logic: Load fresh form
         setInspectionData(prev => {
             const newAreas = { ...prev.areas };
             const freshArea = JSON.parse(JSON.stringify(INITIAL_AREAS[selectionAreaKey]));
@@ -217,13 +211,11 @@ const App: React.FC = () => {
         });
     };
 
-    // **UPDATED**: Submit to Firebase
     const handleConfirmInspection = async () => {
         if (!currentAreaKey) return;
         const currentArea = inspectionData.areas[currentAreaKey];
         if (!currentArea) return;
 
-        // --- Calculation Logic ---
         let totalScore = 0;
         let maxScore = 0;
         const deductions: Deduction[] = [];
@@ -244,7 +236,6 @@ const App: React.FC = () => {
             });
         });
 
-        // Prepare record payload
         const recordToSave: Omit<InspectionRecord, 'id'> = {
             ...currentArea,
             score: totalScore,
@@ -254,32 +245,28 @@ const App: React.FC = () => {
             employee: currentEmployee,
             areaKey: currentAreaKey,
             timestamp: new Date().toISOString(),
-            monthStr: selectedMonth // Important for indexing/querying
+            monthStr: selectedMonth
         };
 
         setIsSubmitting(true);
 
-        // OPTIMISTIC UPDATE:
-        // Instead of awaiting the server response (which causes the "Slow" feeling),
-        // we send the request and immediately provide feedback to the user.
-        // Firebase handles the synchronization in the background.
         addDoc(collection(db, "inspections"), recordToSave)
             .then(() => {
                 console.log("Sync success");
             })
             .catch((e) => {
-                console.error("Background Sync Error: ", e);
-                // Only alert if there is a real error later, though the user might be on another screen.
-                // For a critical error, we might want to let them know.
-                alert("⚠️ 警告：刚才的提交无法同步到云端！\n请检查网络连接。\n" + e.message);
+                console.error("Sync Error: ", e);
+                alert("⚠️ 提交失败！权限不足或网络断开。\n" + e.message);
+                setIsSubmitting(false); // Stop loader if failed
+                return; // Don't proceed
             });
 
-        // Immediate feedback for better UX
+        // Optimistic UI interaction
         setTimeout(() => {
             setIsSubmitting(false);
-            alert("提交成功！");
+            alert("提交成功！(Syncing in background)");
             handleBackToAreas();
-        }, 100); 
+        }, 500); 
     };
 
     const handleCancelInspection = () => {
@@ -288,8 +275,7 @@ const App: React.FC = () => {
         }
     };
     
-    // Management Actions - UPDATED: Use Atomic Operations (arrayUnion/arrayRemove)
-    // This ensures cross-device sync is robust and doesn't overwrite other data.
+    // Management: ADD Employee
     const handleAddEmployee = async () => {
         const name = newEmployeeName.trim();
         if (!name) return;
@@ -297,62 +283,57 @@ const App: React.FC = () => {
         const docRef = doc(db, "config", "employees");
         
         try {
-            // Attempt Atomic Update first
             await updateDoc(docRef, {
                 [manageAreaKey]: arrayUnion(name)
             });
             setNewEmployeeName(''); 
         } catch (e: any) {
-            console.error("Update failed, trying setDoc:", e);
-            // Fallback: If document doesn't exist (code 'not-found'), create it.
+            console.error("Update failed:", e);
             if (e.code === 'not-found') {
                 const newState = { ...employees, [manageAreaKey]: [name] };
-                 // If we have local state, merge it, otherwise start fresh for that key
                 if (employees[manageAreaKey]) {
                     newState[manageAreaKey] = [...employees[manageAreaKey], name];
                 }
                 await setDoc(docRef, newState);
                 setNewEmployeeName('');
             } else {
-                alert("保存失败 (Failed to save): " + e.message);
+                alert("保存失败: " + e.message);
             }
         }
     };
 
+    // Management: DELETE Employee
     const handleDeleteEmployee = async (nameToDelete: string) => {
         if (window.confirm(`确定要删除员工 ${nameToDelete} 吗？`)) {
             const docRef = doc(db, "config", "employees");
             try {
-                // Atomic Remove
                 await updateDoc(docRef, {
                     [manageAreaKey]: arrayRemove(nameToDelete)
                 });
             } catch (e: any) {
-                console.error("Error deleting employee from cloud:", e);
-                alert("删除失败 (Failed to delete): " + e.message);
+                console.error("Error deleting:", e);
+                alert("删除失败: " + e.message);
             }
         }
     };
 
-    // **UPDATED**: Delete from Firebase
     const handleDeleteRecord = async (recordId: string) => {
         if(window.confirm("确定要删除这条云端检查记录吗？此操作不可恢复。")) {
             try {
                 await deleteDoc(doc(db, "inspections", recordId));
             } catch (e) {
                 console.error("Error deleting doc: ", e);
-                alert("删除失败 (Error deleting).");
+                alert("删除失败。请检查权限。");
             }
         }
     };
 
-    // **NEW**: Permission Check for Management
     const handleAccessManagement = () => {
-        const password = window.prompt("请输入管理员密码以进入后台 (Enter Admin Password):");
+        const password = window.prompt("请输入管理员密码以进入后台:");
         if (password === 'admin888') {
             setView('management');
         } else if (password !== null) {
-            alert("密码错误，无法进入！(Incorrect Password)");
+            alert("密码错误！");
         }
     };
 
@@ -365,19 +346,21 @@ const App: React.FC = () => {
                 {/* Sync Status Indicator */}
                 <div className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center gap-1 bg-black/20 px-2 py-1 rounded text-xs" title={syncStatus === 'connected' ? "云端已连接" : "连接中或离线"}>
                     <div className={`w-2 h-2 rounded-full ${syncStatus === 'connected' ? 'bg-green-400' : syncStatus === 'error' ? 'bg-red-500' : 'bg-yellow-400 animate-pulse'}`}></div>
-                    <span>{syncStatus === 'connected' ? '已同步' : syncStatus === 'error' ? '离线' : '连接中'}</span>
+                    <span>
+                        {syncStatus === 'connected' ? '已同步' : syncStatus === 'error' ? '断开' : '连接中...'}
+                    </span>
                 </div>
 
                 <button 
                     onClick={handleAccessManagement}
                     className="absolute right-4 bg-white/10 hover:bg-white text-white hover:text-[#3498db] border border-white/40 px-3 py-1.5 rounded shadow-sm text-sm transition-all duration-200 flex items-center gap-1 backdrop-blur-sm"
-                    title="需要管理员密码"
+                    disabled={!isEmployeesLoaded} // Prevent entry until config loaded
                 >
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.157.945c.03.18.158.322.336.37.587.159 1.144.398 1.663.708.163.097.362.073.498-.06l.732-.71c.408-.396 1.05-.407 1.465-.02l.772.716c.42.389.467 1.033.106 1.47l-.54.654c-.118.143-.133.344-.04.512.277.514.475 1.057.586 1.628.035.18.175.31.358.323l.913.063c.556.038.99.492.99 1.048v1.074c0 .556-.434 1.01-.99 1.048l-.913.063c-.183.013-.323.143-.358.323a8.18 8.18 0 01-.586 1.628c-.093.168-.078.37.04.512l.54.654c.36.437.314 1.08-.106 1.47l-.772.716c-.415.387-1.057.376-1.465-.02l-.732-.71c-.136-.132-.335-.157-.498-.06a8.154 8.154 0 01-1.663.708c-.178.048-.306.19-.336.37l-.157.945z" />
                         <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
-                    人员管理
+                    人员管理 {isEmployeesLoaded ? '' : '(加载中...)'}
                 </button>
             </div>
 
@@ -419,17 +402,17 @@ const App: React.FC = () => {
             </div>
             <button 
                 type="button"
-                className="bg-[#27ae60] text-white border-none py-[10px] px-[15px] rounded-[4px] cursor-pointer text-[16px] m-[5px] hover:bg-[#219653] transition-colors duration-300 w-full"
+                className="bg-[#27ae60] text-white border-none py-[10px] px-[15px] rounded-[4px] cursor-pointer text-[16px] m-[5px] hover:bg-[#219653] transition-colors duration-300 w-full disabled:bg-gray-400 disabled:cursor-not-allowed"
                 onClick={() => handleStartInspection(inspectionData.inspector, inspectionData.shop)}
+                disabled={!isEmployeesLoaded}
             >
-                开始检查 / 查看该月进度
+                {isEmployeesLoaded ? '开始检查 / 查看该月进度' : '正在同步云端数据，请稍候...'}
             </button>
         </div>
     );
 
     const renderManagement = () => (
         <div id="management-page">
-            {/* Same as before, omitted for brevity but retained in full code */}
             <div className="bg-[#3498db] text-white p-[15px] rounded-[5px] mb-[20px] flex justify-between items-center">
                 <h2 className="text-xl font-bold">人员管理后台</h2>
                 <button 
@@ -457,6 +440,7 @@ const App: React.FC = () => {
                         <button onClick={handleAddEmployee} className="bg-[#27ae60] text-white px-4 py-2 rounded hover:bg-[#219653]">添加</button>
                     </div>
                     <div className="space-y-2">
+                        {employees[manageAreaKey]?.length === 0 && <p className="text-gray-400 italic">暂无员工</p>}
                         {employees[manageAreaKey]?.map((name, idx) => (
                             <div key={idx} className="flex justify-between items-center p-3 bg-gray-50 rounded border">
                                 <span>{name}</span>
@@ -522,6 +506,7 @@ const App: React.FC = () => {
                                 <option key={idx} value={name}>{name}</option>
                             ))}
                         </select>
+                        {!isEmployeesLoaded && <p className="text-xs text-red-500 mt-1">正在等待员工名单同步...</p>}
                     </div>
 
                     <button 
