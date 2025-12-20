@@ -267,7 +267,8 @@ const App: React.FC = () => {
             employee: currentEmployee,
             areaKey: currentAreaKey,
             timestamp: new Date().toISOString(),
-            monthStr: selectedMonth
+            monthStr: selectedMonth,
+            inspector: inspectionData.inspector // Save current inspector to record
         };
 
         setIsSubmitting(true);

@@ -36,6 +36,7 @@ export interface InspectionRecord extends AreaData {
     areaKey: string; // e.g., 'vegetables'
     timestamp: string; // ISO String
     monthStr: string; // e.g. "2023-10" for easy grouping
+    inspector?: string; // The person who performed this specific inspection
 }
 
 export interface Areas {
