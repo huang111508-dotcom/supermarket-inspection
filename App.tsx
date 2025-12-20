@@ -42,6 +42,9 @@ const App: React.FC = () => {
     
     // UI State
     const [view, setView] = useState<ViewState>('inspector-info');
+    // New state to track where we came from (to handle "Back" button correctly)
+    const [previousView, setPreviousView] = useState<ViewState>('area-selection');
+
     const [currentAreaKey, setCurrentAreaKey] = useState<string>('');
     const [currentEmployee, setCurrentEmployee] = useState<string>('');
     const [searchTerm, setSearchTerm] = useState<string>('');
@@ -105,10 +108,7 @@ const App: React.FC = () => {
                 Object.assign(safeData, cloudData);
                 setEmployees(safeData);
             } else {
-                // If cloud config doesn't exist, we don't load defaults anymore to avoid "ghost data".
-                // We just show an empty list, forcing the admin to add employees.
                 console.log("No employee config in cloud.");
-                // Initialize structure locally so app doesn't crash
                 const safeData: EmployeeConfig = {};
                 Object.keys(INITIAL_AREAS).forEach(key => { safeData[key] = []; });
                 setEmployees(safeData);
@@ -150,7 +150,6 @@ const App: React.FC = () => {
     }, [selectedMonth]);
 
     // --- Actions ---
-    // (Kept original logic for brevity, ensuring no functionality is lost)
     
     const handleStartInspection = (inspector: string, shop: string) => {
         if (!inspector || !shop) {
@@ -184,7 +183,22 @@ const App: React.FC = () => {
         setView('inspection');
     };
 
-    const handleViewResults = () => setView('results');
+    // Updated: Go to results via specific entry point logic
+    const handleViewResults = (from: ViewState) => {
+        setPreviousView(from);
+        setView('results');
+    };
+
+    // Updated: Generic Back button
+    const handleBack = () => {
+        if (view === 'results') {
+            setView(previousView); // Return to Management or Area Selection
+        } else if (view === 'inspection') {
+            setView('area-selection');
+        } else {
+            setView('area-selection');
+        }
+    };
 
     const handleBackToAreas = () => {
         setSelectionAreaKey('');
@@ -263,7 +277,7 @@ const App: React.FC = () => {
             setIsSubmitting(false);
             alert("提交成功！(Syncing in background)");
             handleBackToAreas();
-        }, 300); // Faster optimistic feedback
+        }, 300); 
     };
 
     const handleCancelInspection = () => {
@@ -272,7 +286,7 @@ const App: React.FC = () => {
         }
     };
     
-    // Management Actions - Admin Update Prevails
+    // Management Actions
     const handleAddEmployee = async () => {
         const name = newEmployeeName.trim();
         if (!name) return;
@@ -325,7 +339,6 @@ const App: React.FC = () => {
             <div className="bg-[#3498db] text-white p-[15px] rounded-[5px] mb-[20px] relative flex justify-center items-center">
                 <h1 className="text-center text-2xl font-bold">超市巡店检查评分系统 (云端版)</h1>
                 
-                {/* Optimized Sync Status Indicator */}
                 <div className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center gap-1 bg-black/20 px-2 py-1 rounded text-xs" 
                      title={syncStatus === 'connected' ? "云端已连接" : "检查Firebase数据库设置"}>
                     <div className={`w-2 h-2 rounded-full ${
@@ -336,7 +349,7 @@ const App: React.FC = () => {
                     <span>
                         {syncStatus === 'connected' ? '已同步' : 
                          syncStatus === 'error' ? '连接失败' : 
-                         syncStatus === 'slow' ? '连接缓慢(检查后台)' : '连接中...'}
+                         syncStatus === 'slow' ? '连接缓慢' : '连接中...'}
                     </span>
                 </div>
 
@@ -349,7 +362,7 @@ const App: React.FC = () => {
                         <path strokeLinecap="round" strokeLinejoin="round" d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.157.945c.03.18.158.322.336.37.587.159 1.144.398 1.663.708.163.097.362.073.498-.06l.732-.71c.408-.396 1.05-.407 1.465-.02l.772.716c.42.389.467 1.033.106 1.47l-.54.654c-.118.143-.133.344-.04.512.277.514.475 1.057.586 1.628.035.18.175.31.358.323l.913.063c.556.038.99.492.99 1.048v1.074c0 .556-.434 1.01-.99 1.048l-.913.063c-.183.013-.323.143-.358.323a8.18 8.18 0 01-.586 1.628c-.093.168-.078.37.04.512l.54.654c.36.437.314 1.08-.106 1.47l-.772.716c-.415.387-1.057.376-1.465-.02l-.732-.71c-.136-.132-.335-.157-.498-.06a8.154 8.154 0 01-1.663.708c-.178.048-.306.19-.336.37l-.157.945z" />
                         <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
-                    人员管理 {(!isEmployeesLoaded && syncStatus === 'connecting') ? '(加载中...)' : ''}
+                    管理后台
                 </button>
             </div>
 
@@ -396,7 +409,7 @@ const App: React.FC = () => {
             >
                 {(!isEmployeesLoaded && syncStatus !== 'connected') ? 
                     (syncStatus === 'slow' ? '连接缓慢，请检查后台设置' : '正在连接云端...') : 
-                    '开始检查 / 查看该月进度'}
+                    '开始检查'}
             </button>
         </div>
     );
@@ -404,14 +417,45 @@ const App: React.FC = () => {
     const renderManagement = () => (
         <div id="management-page">
             <div className="bg-[#3498db] text-white p-[15px] rounded-[5px] mb-[20px] flex justify-between items-center">
-                <h2 className="text-xl font-bold">人员管理后台</h2>
+                <h2 className="text-xl font-bold">人员与报表管理后台</h2>
                 <button onClick={() => setView('inspector-info')} className="bg-transparent border border-white text-white px-3 py-1 rounded hover:bg-white hover:text-[#3498db]">
                     返回首页
                 </button>
             </div>
+
+            {/* NEW: Report Management Section */}
+            <div className="bg-white p-4 rounded border mb-6 shadow-sm border-l-4 border-l-[#27ae60]">
+                <h3 className="font-bold text-lg mb-3 text-gray-800 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                    </svg>
+                    数据报表管理
+                </h3>
+                <div className="flex flex-col md:flex-row items-center gap-4 bg-gray-50 p-3 rounded">
+                    <div className="flex items-center gap-2">
+                        <label className="font-bold text-gray-700">选择查看月份:</label>
+                        <input 
+                            type="month" 
+                            value={selectedMonth} 
+                            onChange={(e) => setSelectedMonth(e.target.value)} 
+                            className="p-2 border border-gray-300 rounded focus:ring-2 focus:ring-[#3498db] outline-none" 
+                        />
+                    </div>
+                    <div className="text-sm text-gray-500">
+                        当前选中: {selectedMonth} (共 {inspectionData.records.length} 条记录)
+                    </div>
+                    <button 
+                        onClick={() => handleViewResults('management')} 
+                        className="bg-[#27ae60] hover:bg-[#219653] text-white px-6 py-2 rounded font-bold shadow transition-colors ml-auto"
+                    >
+                        查看报表 & 导出 Excel
+                    </button>
+                </div>
+            </div>
+
             <div className="flex flex-col md:flex-row gap-4">
                 <div className="w-full md:w-1/3 bg-gray-50 p-4 rounded border">
-                    <h3 className="font-bold mb-3">选择区域</h3>
+                    <h3 className="font-bold mb-3">人员管理 - 选择区域</h3>
                     <div className="flex flex-col gap-2">
                         {[{ key: 'vegetables', label: '蔬果区' }, { key: 'grocery', label: '食百区' }, { key: 'seafood', label: '水产区' }, { key: 'meat', label: '肉品区' }, { key: 'deli', label: '熟食区' }, { key: 'cashier', label: '收银区域' }].map(area => (
                             <button key={area.key} onClick={() => setManageAreaKey(area.key)} className={`text-left p-3 rounded ${manageAreaKey === area.key ? 'bg-[#3498db] text-white' : 'bg-white hover:bg-gray-100'}`}>
@@ -440,7 +484,6 @@ const App: React.FC = () => {
         </div>
     );
 
-    // ... (AreaSelection, InspectionPage, ResultsPage remain largely the same, included below for completeness)
     const renderAreaSelection = () => {
         const areaOptions = [
             { key: 'vegetables', label: '蔬果区', sub: 'Vegetables & Fruits' },
@@ -480,7 +523,7 @@ const App: React.FC = () => {
                         开始检查 (Start Inspection)
                     </button>
                 </div>
-                <div className="mt-8 border-t pt-6">
+                <div className="mt-8 border-t pt-6 pb-6">
                     <h3 className="text-lg font-bold text-gray-700 mb-4 text-center">{selectedMonth} 月份检查记录 ({inspectionData.records.length})</h3>
                     {isLoading ? (<p className="text-center text-gray-500">正在从云端同步数据...</p>) : inspectionData.records.length === 0 ? (<p className="text-center text-gray-400">该月份暂无检查记录</p>) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -496,11 +539,7 @@ const App: React.FC = () => {
                         </div>
                     )}
                 </div>
-                <div className="text-center mt-8 pb-8">
-                    <button type="button" className="bg-[#7f8c8d] text-white border-none py-[10px] px-[20px] rounded-[4px] cursor-pointer text-[16px] hover:bg-[#6c7a7d] transition-colors duration-300" onClick={handleViewResults} disabled={inspectionData.records.length === 0}>
-                        查看 {selectedMonth} 月份汇总结果 & 导出
-                    </button>
-                </div>
+                {/* Button removed from here as requested */}
             </div>
         );
     };
@@ -570,38 +609,52 @@ const App: React.FC = () => {
                     <h2 className="text-center text-xl font-bold">{selectedMonth} 月份检查结果汇总</h2>
                     <p className="text-center mt-2">数据来源: 云端数据库实时同步</p>
                 </div>
+                
+                {/* Month selection also available here for convenience */}
                 <div className="flex justify-center items-center mb-6">
                     <label className="mr-2 font-bold">切换月份查看历史:</label>
                     <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="p-2 border rounded" />
                 </div>
-                <div className="text-[18px] font-bold my-[20px] text-center">{selectedMonth} 总分 (Sum of Averages): <span>{displayTotalScore}</span> / <span>{totalMaxScoreSum}</span> (<span>{overallPercentage}</span>%)</div>
-                <table className="w-full border-collapse my-[20px]">
-                    <thead>
-                        <tr>
-                            <th className="border border-[#ddd] p-[8px] bg-[#3498db] text-white">区域</th>
-                            <th className="border border-[#ddd] p-[8px] bg-[#3498db] text-white">员工</th>
-                            <th className="border border-[#ddd] p-[8px] bg-[#3498db] text-white">次数</th>
-                            <th className="border border-[#ddd] p-[8px] bg-[#3498db] text-white">平均分</th>
-                            <th className="border border-[#ddd] p-[8px] bg-[#3498db] text-white">满分</th>
-                            <th className="border border-[#ddd] p-[8px] bg-[#3498db] text-white">%</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {results.map((data, idx) => (
-                            <tr key={idx} className={idx % 2 === 0 ? "bg-[#f2f2f2]" : ""}>
-                                <td className="border p-[8px]">{data.name}</td>
-                                <td className="border p-[8px] font-bold text-blue-600">{data.employee}</td>
-                                <td className="border p-[8px] text-center">{data.count}</td>
-                                <td className="border p-[8px] font-bold">{data.avgScore}</td>
-                                <td className="border p-[8px]">{data.maxScore}</td>
-                                <td className="border p-[8px]">{(data.maxScore > 0 ? (data.avgScore / data.maxScore * 100).toFixed(1) : '0')}%</td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
+                
+                {inspectionData.records.length === 0 ? (
+                    <div className="text-center py-10 bg-gray-50 rounded border border-dashed border-gray-300">
+                        <p className="text-gray-500 text-lg">该月份 ({selectedMonth}) 暂无检查记录。</p>
+                        <p className="text-sm text-gray-400 mt-2">请切换月份或返回进行新的检查。</p>
+                    </div>
+                ) : (
+                    <>
+                        <div className="text-[18px] font-bold my-[20px] text-center">{selectedMonth} 总分 (Sum of Averages): <span>{displayTotalScore}</span> / <span>{totalMaxScoreSum}</span> (<span>{overallPercentage}</span>%)</div>
+                        <table className="w-full border-collapse my-[20px]">
+                            <thead>
+                                <tr>
+                                    <th className="border border-[#ddd] p-[8px] bg-[#3498db] text-white">区域</th>
+                                    <th className="border border-[#ddd] p-[8px] bg-[#3498db] text-white">员工</th>
+                                    <th className="border border-[#ddd] p-[8px] bg-[#3498db] text-white">次数</th>
+                                    <th className="border border-[#ddd] p-[8px] bg-[#3498db] text-white">平均分</th>
+                                    <th className="border border-[#ddd] p-[8px] bg-[#3498db] text-white">满分</th>
+                                    <th className="border border-[#ddd] p-[8px] bg-[#3498db] text-white">%</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {results.map((data, idx) => (
+                                    <tr key={idx} className={idx % 2 === 0 ? "bg-[#f2f2f2]" : ""}>
+                                        <td className="border p-[8px]">{data.name}</td>
+                                        <td className="border p-[8px] font-bold text-blue-600">{data.employee}</td>
+                                        <td className="border p-[8px] text-center">{data.count}</td>
+                                        <td className="border p-[8px] font-bold">{data.avgScore}</td>
+                                        <td className="border p-[8px]">{data.maxScore}</td>
+                                        <td className="border p-[8px]">{(data.maxScore > 0 ? (data.avgScore / data.maxScore * 100).toFixed(1) : '0')}%</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </>
+                )}
+                
                 <div className="text-center mt-[20px] pb-10">
-                    <button onClick={() => exportToExcel(inspectionData)} className="bg-[#27ae60] text-white px-4 py-2 rounded mr-4">导出本月报表 (Excel)</button>
-                    <button onClick={handleBackToAreas} className="bg-[#7f8c8d] text-white px-4 py-2 rounded">返回</button>
+                    <button onClick={() => exportToExcel(inspectionData)} disabled={inspectionData.records.length === 0} className={`bg-[#27ae60] text-white px-4 py-2 rounded mr-4 ${inspectionData.records.length === 0 ? 'bg-gray-400 cursor-not-allowed' : ''}`}>导出本月报表 (Excel)</button>
+                    {/* Back button logic updated */}
+                    <button onClick={handleBack} className="bg-[#7f8c8d] text-white px-4 py-2 rounded">返回</button>
                 </div>
             </div>
         );
