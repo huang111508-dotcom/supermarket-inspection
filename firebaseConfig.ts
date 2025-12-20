@@ -1,5 +1,6 @@
+
 // Import the functions you need from the SDKs you need
-import * as firebaseApp from "firebase/app";
+import { initializeApp } from "firebase/app";
 import { getFirestore, enableIndexedDbPersistence } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -12,13 +13,13 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-// Cast to any to handle potential type definition mismatches where initializeApp is not recognized
-const app = (firebaseApp as any).initializeApp(firebaseConfig);
+const app = initializeApp(firebaseConfig);
 
 // Initialize Firestore
 export const db = getFirestore(app);
 
 // Enable Offline Persistence
+// Note: This might throw errors in some environments (like server-side rendering), so we catch them.
 enableIndexedDbPersistence(db).catch((err) => {
     if (err.code == 'failed-precondition') {
         // Multiple tabs open, persistence can only be enabled in one tab at a a time.
