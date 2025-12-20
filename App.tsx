@@ -79,28 +79,31 @@ const App: React.FC = () => {
         const docRef = doc(db, "config", "employees");
         
         // Listen to the document in real-time
-        // Added includeMetadataChanges to debug potential caching issues if needed, though persistence is off now.
         const unsubscribe = onSnapshot(docRef, { includeMetadataChanges: true }, (docSnap) => {
             setSyncStatus('connected');
             if (docSnap.exists()) {
                 const cloudData = docSnap.data() as EmployeeConfig;
-                console.log("Employees synced from cloud.", cloudData);
+                console.log("Employees synced from cloud (Absolute Truth).", cloudData);
                 
-                // Merge with INITIAL_EMPLOYEES to ensure all keys exist even if cloud doc is partial
-                // Cloud data takes precedence
-                const mergedEmployees = { ...INITIAL_EMPLOYEES, ...cloudData };
+                // CRITICAL FIX: Do NOT merge with INITIAL_EMPLOYEES.
+                // Cloud data is the absolute truth. If cloud says empty, it's empty.
+                // We only ensure the object structure exists to prevent UI errors.
                 
-                // Specifically ensure arrays are arrays (defensive coding)
-                Object.keys(mergedEmployees).forEach(key => {
-                    if (!Array.isArray(mergedEmployees[key])) {
-                        mergedEmployees[key] = [];
-                    }
+                const safeData: EmployeeConfig = {};
+                
+                // 1. Create empty arrays for all known areas (to ensure keys exist)
+                Object.keys(INITIAL_AREAS).forEach(key => {
+                    safeData[key] = [];
                 });
 
-                setEmployees(mergedEmployees);
+                // 2. Overwrite with actual cloud data
+                // If cloudData['vegetables'] is empty, it stays empty (deleted employees stay deleted)
+                Object.assign(safeData, cloudData);
+
+                setEmployees(safeData);
             } else {
-                console.log("No config found in cloud via snapshot. Initializing...");
-                // Initialize if missing
+                console.log("No config found in cloud. Initializing with defaults...");
+                // Only use INITIAL_EMPLOYEES if the database is completely empty (first run)
                 setDoc(docRef, INITIAL_EMPLOYEES).catch(e => {
                     console.error("Failed to initialize config in cloud:", e);
                 });
