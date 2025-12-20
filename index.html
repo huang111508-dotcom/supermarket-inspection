@@ -3,15 +3,28 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>超市巡店检查评分系统</title>
+    
+    <!-- PWA Configuration -->
+    <title>龙城店巡检</title>
+    <meta name="theme-color" content="#3498db">
+    <link rel="manifest" href="/manifest.json">
+    
+    <!-- iOS Support -->
+    <link rel="apple-touch-icon" href="https://img.icons8.com/color/512/inspection.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="龙城店巡检">
+
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
             font-family: 'Microsoft YaHei', Arial, sans-serif;
+            /* Prevent pull-to-refresh on mobile which feels less app-like */
+            overscroll-behavior-y: none;
         }
     </style>
 <script type="importmap">
@@ -30,5 +43,19 @@
 <body class="bg-[#f5f5f5] text-[#333]">
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
+    <script>
+      // Register Service Worker for PWA support
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then(registration => {
+              console.log('SW registered: ', registration);
+            })
+            .catch(registrationError => {
+              console.log('SW registration failed: ', registrationError);
+            });
+        });
+      }
+    </script>
 </body>
 </html>
