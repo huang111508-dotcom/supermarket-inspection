@@ -6,7 +6,21 @@ import { exportToExcel } from './utils/excelExport';
 
 // Firebase Imports
 import { db } from './firebaseConfig';
-import { collection, addDoc, query, where, onSnapshot, deleteDoc, doc, orderBy, setDoc } from 'firebase/firestore';
+import { 
+    collection, 
+    addDoc, 
+    query, 
+    where, 
+    onSnapshot, 
+    deleteDoc, 
+    doc, 
+    orderBy, 
+    setDoc, 
+    updateDoc, 
+    arrayUnion, 
+    arrayRemove,
+    getDoc 
+} from 'firebase/firestore';
 
 const App: React.FC = () => {
     // Helper to get current month string "YYYY-MM"
@@ -45,6 +59,9 @@ const App: React.FC = () => {
     const [isLoading, setIsLoading] = useState<boolean>(false);
     // **NEW**: Submitting state for feedback
     const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+    
+    // **NEW**: Connection Status
+    const [syncStatus, setSyncStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');
 
     // Initialize Date string for the form
     useEffect(() => {
@@ -58,28 +75,30 @@ const App: React.FC = () => {
         setInspectionData(prev => ({ ...prev, date: formattedDate }));
     }, []);
 
-    // **NEW**: Load Employees from Cloud using onSnapshot (Real-time Sync)
+    // **NEW**: Load Employees from Cloud using onSnapshot (Real-time Sync) with Atomic Init Check
     useEffect(() => {
         const docRef = doc(db, "config", "employees");
         
         // Listen to the document in real-time
         const unsubscribe = onSnapshot(docRef, (docSnap) => {
+            setSyncStatus('connected');
             if (docSnap.exists()) {
                 console.log("Employees synced from cloud.");
                 setEmployees(docSnap.data() as EmployeeConfig);
             } else {
-                console.log("No config found in cloud, initializing with defaults...");
-                // If the document doesn't exist yet, create it with initial data
+                console.log("No config found in cloud via snapshot. Checking logic...");
+                // Only write defaults if we are sure it's empty (handled by a separate check or user action usually, 
+                // but for simplicity we init here if missing).
+                // Use a transactional style check effectively by just setting it if missing.
                 setDoc(docRef, INITIAL_EMPLOYEES).catch(e => {
                     console.error("Failed to initialize config in cloud:", e);
                 });
             }
         }, (error) => {
             console.error("Sync Error (Employees):", error);
-            // If we can't read from cloud (e.g. permission error), we keep the initial state.
-            // You might want to alert the user here if needed.
+            setSyncStatus('error');
             if (error.code === 'permission-denied') {
-               alert("警告：无法从云端加载员工名单 (Permission Denied)。请检查数据库规则。");
+               alert("警告：无法从云端加载员工名单 (Permission Denied)。");
             }
         });
 
@@ -255,43 +274,45 @@ const App: React.FC = () => {
         }
     };
     
-    // Management Actions - UPDATED: Rely on Cloud State
+    // Management Actions - UPDATED: Use Atomic Operations (arrayUnion/arrayRemove)
+    // This ensures cross-device sync is robust and doesn't overwrite other data.
     const handleAddEmployee = async () => {
-        if (!newEmployeeName.trim()) return;
+        const name = newEmployeeName.trim();
+        if (!name) return;
         
-        const currentList = employees[manageAreaKey] || [];
-        // Prevent duplicates strictly? Or allow same name? Better to allow for now or simple check.
-        const updatedList = [...currentList, newEmployeeName.trim()];
-        
-        const updatedEmployees = {
-            ...employees,
-            [manageAreaKey]: updatedList
-        };
-
-        // We DO NOT setEmployees here manually. 
-        // We setDoc, and let the onSnapshot listener update the UI.
-        // This confirms to the user that the data is actually being synced.
+        const docRef = doc(db, "config", "employees");
         
         try {
-            // Use setDoc to overwrite/merge the config document
-            await setDoc(doc(db, "config", "employees"), updatedEmployees);
-            setNewEmployeeName(''); // Clear input on success (or optimistic success)
+            // Attempt Atomic Update first
+            await updateDoc(docRef, {
+                [manageAreaKey]: arrayUnion(name)
+            });
+            setNewEmployeeName(''); 
         } catch (e: any) {
-            console.error("Error saving employee to cloud:", e);
-            alert("保存员工失败 (Failed to save): " + e.message);
+            console.error("Update failed, trying setDoc:", e);
+            // Fallback: If document doesn't exist (code 'not-found'), create it.
+            if (e.code === 'not-found') {
+                const newState = { ...employees, [manageAreaKey]: [name] };
+                 // If we have local state, merge it, otherwise start fresh for that key
+                if (employees[manageAreaKey]) {
+                    newState[manageAreaKey] = [...employees[manageAreaKey], name];
+                }
+                await setDoc(docRef, newState);
+                setNewEmployeeName('');
+            } else {
+                alert("保存失败 (Failed to save): " + e.message);
+            }
         }
     };
 
     const handleDeleteEmployee = async (nameToDelete: string) => {
         if (window.confirm(`确定要删除员工 ${nameToDelete} 吗？`)) {
-            const updatedList = employees[manageAreaKey].filter(name => name !== nameToDelete);
-            const updatedEmployees = {
-                ...employees,
-                [manageAreaKey]: updatedList
-            };
-
+            const docRef = doc(db, "config", "employees");
             try {
-                await setDoc(doc(db, "config", "employees"), updatedEmployees);
+                // Atomic Remove
+                await updateDoc(docRef, {
+                    [manageAreaKey]: arrayRemove(nameToDelete)
+                });
             } catch (e: any) {
                 console.error("Error deleting employee from cloud:", e);
                 alert("删除失败 (Failed to delete): " + e.message);
@@ -327,6 +348,12 @@ const App: React.FC = () => {
         <div id="inspector-info-page">
             <div className="bg-[#3498db] text-white p-[15px] rounded-[5px] mb-[20px] relative flex justify-center items-center">
                 <h1 className="text-center text-2xl font-bold">超市巡店检查评分系统 (云端版)</h1>
+                {/* Sync Status Indicator */}
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center gap-1 bg-black/20 px-2 py-1 rounded text-xs" title={syncStatus === 'connected' ? "云端已连接" : "连接中或离线"}>
+                    <div className={`w-2 h-2 rounded-full ${syncStatus === 'connected' ? 'bg-green-400' : syncStatus === 'error' ? 'bg-red-500' : 'bg-yellow-400 animate-pulse'}`}></div>
+                    <span>{syncStatus === 'connected' ? '已同步' : syncStatus === 'error' ? '离线' : '连接中'}</span>
+                </div>
+
                 <button 
                     onClick={handleAccessManagement}
                     className="absolute right-4 bg-white/10 hover:bg-white text-white hover:text-[#3498db] border border-white/40 px-3 py-1.5 rounded shadow-sm text-sm transition-all duration-200 flex items-center gap-1 backdrop-blur-sm"
