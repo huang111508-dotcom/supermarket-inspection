@@ -1,7 +1,7 @@
 
 {
-  "name": "龙城店巡检",
-  "short_name": "龙城店巡检",
+  "name": "商超门店巡检",
+  "short_name": "商超门店巡检",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f5f5f5",

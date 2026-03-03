@@ -542,7 +542,7 @@ const App: React.FC = () => {
     const renderInspectorInfo = () => (
         <div id="inspector-info-page">
             <div className="bg-[#3498db] text-white p-[15px] rounded-[5px] mb-[20px] relative flex justify-center items-center">
-                <h1 className="text-center text-2xl font-bold">商超巡检考核系统</h1>
+                <h1 className="text-center text-2xl font-bold">商超门店巡检</h1>
                 
                 <div className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center gap-1 bg-black/20 px-2 py-1 rounded text-xs" 
                      title={syncStatus === 'connected' ? "云端已连接" : "检查Firebase数据库设置"}>
