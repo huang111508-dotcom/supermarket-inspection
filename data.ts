@@ -2,12 +2,14 @@
 import { Areas, EmployeeConfig } from './types';
 
 export const INITIAL_EMPLOYEES: EmployeeConfig = {
-    vegetables: ["张三", "李四", "王五"],
-    grocery: ["赵六", "孙七"],
-    seafood: ["周八"],
-    meat: ["吴九", "郑十"],
-    deli: ["刘一"],
-    cashier: ["陈二", "林三"]
+    '龙城店': {
+        vegetables: ["张三", "李四", "王五"],
+        grocery: ["赵六", "孙七"],
+        seafood: ["周八"],
+        meat: ["吴九", "郑十"],
+        deli: ["刘一"],
+        cashier: ["陈二", "林三"]
+    }
 };
 
 export const INITIAL_AREAS: Areas = {

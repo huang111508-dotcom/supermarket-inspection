@@ -1,5 +1,5 @@
 {
-  "name": "Supermarket Inspection System",
-  "description": "A supermarket store inspection and scoring system covering various departments like vegetables, grocery, seafood, meat, deli, and cashier.",
+  "name": "商超巡检考核",
+  "description": "A multi-store supermarket inspection and assessment system.",
   "requestFramePermissions": []
 }

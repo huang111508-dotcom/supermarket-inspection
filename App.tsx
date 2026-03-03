@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { InspectionData, ViewState, Deduction, EmployeeConfig, InspectionRecord } from './types';
+import { InspectionData, ViewState, Deduction, EmployeeConfig, InspectionRecord, AppConfig } from './types';
 import { INITIAL_AREAS } from './data';
 import { exportToExcel } from './utils/excelExport';
 
@@ -17,7 +17,8 @@ import {
     setDoc, 
     updateDoc, 
     arrayUnion, 
-    arrayRemove
+    arrayRemove,
+    getDoc
 } from 'firebase/firestore';
 
 const App: React.FC = () => {
@@ -30,11 +31,23 @@ const App: React.FC = () => {
     // Application State
     const [inspectionData, setInspectionData] = useState<InspectionData>(() => ({
         inspector: '',
-        shop: '',
+        shop: '龙城店', // Default shop
         date: '',
         areas: JSON.parse(JSON.stringify(INITIAL_AREAS)),
         records: [] 
     }));
+
+    const [appConfig, setAppConfig] = useState<AppConfig>({
+        stores: ['龙城店'],
+        areas: [
+            { key: 'vegetables', label: '蔬果区' },
+            { key: 'grocery', label: '食百区' },
+            { key: 'seafood', label: '水产区' },
+            { key: 'meat', label: '肉品区' },
+            { key: 'deli', label: '熟食区' },
+            { key: 'cashier', label: '收银区域' }
+        ]
+    });
 
     const [employees, setEmployees] = useState<EmployeeConfig>({});
     const [isEmployeesLoaded, setIsEmployeesLoaded] = useState<boolean>(false);
@@ -56,8 +69,10 @@ const App: React.FC = () => {
     const [selectionEmployee, setSelectionEmployee] = useState<string>('');
 
     // For Management View
+    const [manageTab, setManageTab] = useState<'stores' | 'areas' | 'employees'>('employees');
+    const [manageStore, setManageStore] = useState<string>('龙城店');
     const [manageAreaKey, setManageAreaKey] = useState<string>('vegetables');
-    const [newEmployeeName, setNewEmployeeName] = useState<string>('');
+    const [newItemName, setNewItemName] = useState<string>(''); // For adding stores/areas/employees
 
     // Month Selection
     const [selectedMonth, setSelectedMonth] = useState<string>(getCurrentMonthStr());
@@ -92,28 +107,54 @@ const App: React.FC = () => {
         return () => clearTimeout(timer);
     }, []);
 
+    // ** LOAD APP CONFIG (Priority 0) **
+    useEffect(() => {
+        const docRef = doc(db, "config", "app");
+        const unsubscribe = onSnapshot(docRef, (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data() as AppConfig;
+                // Merge with defaults to ensure structure
+                setAppConfig(prev => ({
+                    stores: data.stores || prev.stores,
+                    areas: data.areas || prev.areas
+                }));
+            } else {
+                // Initialize if not exists
+                setDoc(docRef, appConfig);
+            }
+        });
+        return () => unsubscribe();
+    }, []);
+
     // ** LOAD EMPLOYEES (Priority 1) **
     useEffect(() => {
         const docRef = doc(db, "config", "employees");
         
-        const unsubscribe = onSnapshot(docRef, (docSnap) => {
+        const unsubscribe = onSnapshot(docRef, async (docSnap) => {
             hasReceivedData.current = true;
             setSyncStatus('connected');
             setIsEmployeesLoaded(true);
 
             if (docSnap.exists()) {
-                const cloudData = docSnap.data() as EmployeeConfig;
-                // Ensure structural integrity
-                const safeData: EmployeeConfig = {};
-                Object.keys(INITIAL_AREAS).forEach(key => { safeData[key] = []; });
-                // Cloud data overwrites local structure
-                Object.assign(safeData, cloudData);
-                setEmployees(safeData);
+                const cloudData = docSnap.data();
+                
+                // MIGRATION CHECK: Check if data is in old format (flat keys like 'vegetables')
+                // or new format (keys are store names like '龙城店')
+                // We assume if it has 'vegetables' at top level, it's old format.
+                if (cloudData['vegetables'] && Array.isArray(cloudData['vegetables'])) {
+                    console.log("Migrating old employee data to '龙城店'...");
+                    const newStructure: EmployeeConfig = {
+                        '龙城店': cloudData as any
+                    };
+                    // Update cloud
+                    await setDoc(docRef, newStructure);
+                    // Local state update will happen on next snapshot
+                } else {
+                    setEmployees(cloudData as EmployeeConfig);
+                }
             } else {
                 console.log("No employee config in cloud.");
-                const safeData: EmployeeConfig = {};
-                Object.keys(INITIAL_AREAS).forEach(key => { safeData[key] = []; });
-                setEmployees(safeData);
+                setEmployees({});
             }
         }, (error) => {
             console.error("Sync Error (Employees):", error);
@@ -268,7 +309,8 @@ const App: React.FC = () => {
             areaKey: currentAreaKey,
             timestamp: new Date().toISOString(),
             monthStr: selectedMonth,
-            inspector: inspectionData.inspector // Save current inspector to record
+            inspector: inspectionData.inspector, // Save current inspector to record
+            shop: inspectionData.shop // Save current shop
         };
 
         setIsSubmitting(true);
@@ -296,23 +338,100 @@ const App: React.FC = () => {
     };
     
     // Management Actions
-    const handleAddEmployee = async () => {
-        const name = newEmployeeName.trim();
+    
+    // --- Store Management ---
+    const handleAddStore = async () => {
+        const name = newItemName.trim();
         if (!name) return;
-        const docRef = doc(db, "config", "employees");
+        if (appConfig.stores.includes(name)) {
+            alert("门店已存在");
+            return;
+        }
+        const docRef = doc(db, "config", "app");
         try {
-            await updateDoc(docRef, { [manageAreaKey]: arrayUnion(name) });
-            setNewEmployeeName(''); 
+            await updateDoc(docRef, { stores: arrayUnion(name) });
+            setNewItemName('');
         } catch (e: any) {
-            if (e.code === 'not-found') {
-                const newState = { ...employees, [manageAreaKey]: [name] };
-                 if (employees[manageAreaKey]) {
-                    newState[manageAreaKey] = [...employees[manageAreaKey], name];
+            alert("保存失败: " + e.message);
+        }
+    };
+
+    const handleDeleteStore = async (name: string) => {
+        if (name === '龙城店') {
+            alert("默认门店无法删除");
+            return;
+        }
+        if (window.confirm(`确定要删除门店 ${name} 吗？`)) {
+            const docRef = doc(db, "config", "app");
+            try {
+                await updateDoc(docRef, { stores: arrayRemove(name) });
+            } catch (e: any) {
+                alert("删除失败: " + e.message);
+            }
+        }
+    };
+
+    // --- Area Management ---
+    const handleAddArea = async () => {
+        const label = newItemName.trim();
+        if (!label) return;
+        
+        // Simple key generation: use label as key for simplicity in this version
+        const key = label; 
+        
+        if (appConfig.areas.some(a => a.key === key)) {
+            alert("区域已存在");
+            return;
+        }
+
+        const newArea = { key, label };
+        const docRef = doc(db, "config", "app");
+        try {
+            await updateDoc(docRef, { areas: arrayUnion(newArea) });
+            setNewItemName('');
+        } catch (e: any) {
+             alert("保存失败: " + e.message);
+        }
+    };
+
+    const handleDeleteArea = async (area: {key: string, label: string}) => {
+        if (window.confirm(`确定要删除区域 ${area.label} 吗？`)) {
+            const docRef = doc(db, "config", "app");
+            try {
+                await updateDoc(docRef, { areas: arrayRemove(area) });
+            } catch (e: any) {
+                alert("删除失败: " + e.message);
+            }
+        }
+    };
+
+    // --- Employee Management ---
+    const handleAddEmployee = async () => {
+        const name = newItemName.trim();
+        if (!name) return;
+        
+        const docRef = doc(db, "config", "employees");
+        const fieldPath = `${manageStore}.${manageAreaKey}`;
+        
+        try {
+            await updateDoc(docRef, { [fieldPath]: arrayUnion(name) });
+            setNewItemName(''); 
+        } catch (e: any) {
+            console.log("Update failed, trying setDoc merge...", e);
+            try {
+                const snap = await getDoc(docRef);
+                const data = snap.exists() ? snap.data() as EmployeeConfig : {};
+                
+                if (!data[manageStore]) data[manageStore] = {};
+                if (!data[manageStore][manageAreaKey]) data[manageStore][manageAreaKey] = [];
+                
+                if (!data[manageStore][manageAreaKey].includes(name)) {
+                    data[manageStore][manageAreaKey].push(name);
+                    await setDoc(docRef, data);
                 }
-                await setDoc(docRef, newState);
-                setNewEmployeeName('');
-            } else {
-                alert("保存失败: " + e.message);
+                setNewItemName('');
+            } catch (err: any) {
+                alert("保存失败: " + err.message);
             }
         }
     };
@@ -320,10 +439,22 @@ const App: React.FC = () => {
     const handleDeleteEmployee = async (nameToDelete: string) => {
         if (window.confirm(`确定要删除员工 ${nameToDelete} 吗？`)) {
             const docRef = doc(db, "config", "employees");
+            const fieldPath = `${manageStore}.${manageAreaKey}`;
             try {
-                await updateDoc(docRef, { [manageAreaKey]: arrayRemove(nameToDelete) });
+                await updateDoc(docRef, { [fieldPath]: arrayRemove(nameToDelete) });
             } catch (e: any) {
-                alert("删除失败: " + e.message);
+                try {
+                    const snap = await getDoc(docRef);
+                    if (snap.exists()) {
+                        const data = snap.data() as EmployeeConfig;
+                        if (data[manageStore] && data[manageStore][manageAreaKey]) {
+                            data[manageStore][manageAreaKey] = data[manageStore][manageAreaKey].filter(n => n !== nameToDelete);
+                            await setDoc(docRef, data);
+                        }
+                    }
+                } catch (err: any) {
+                    alert("删除失败: " + err.message);
+                }
             }
         }
     };
@@ -364,7 +495,7 @@ const App: React.FC = () => {
     const renderInspectorInfo = () => (
         <div id="inspector-info-page">
             <div className="bg-[#3498db] text-white p-[15px] rounded-[5px] mb-[20px] relative flex justify-center items-center">
-                <h1 className="text-center text-2xl font-bold">龙城店巡检考核A03 Store Inspection and Assessment</h1>
+                <h1 className="text-center text-2xl font-bold">商超巡检考核系统</h1>
                 
                 <div className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center gap-1 bg-black/20 px-2 py-1 rounded text-xs" 
                      title={syncStatus === 'connected' ? "云端已连接" : "检查Firebase数据库设置"}>
@@ -420,13 +551,16 @@ const App: React.FC = () => {
             </div>
             <div className="mb-[15px]">
                 <label className="block mb-[5px] font-bold">门店名称 (Shop Name):</label>
-                <input 
-                    type="text" 
-                    className="w-full p-[8px] border border-[#ddd] rounded-[4px] box-border"
+                <select 
+                    className="w-full p-[8px] border border-[#ddd] rounded-[4px] box-border bg-white"
                     value={inspectionData.shop}
                     onChange={(e) => setInspectionData(prev => ({...prev, shop: e.target.value}))}
                     required 
-                />
+                >
+                    {appConfig.stores.map(store => (
+                        <option key={store} value={store}>{store}</option>
+                    ))}
+                </select>
             </div>
             <button 
                 type="button"
@@ -444,7 +578,7 @@ const App: React.FC = () => {
     const renderManagement = () => (
         <div id="management-page">
             <div className="bg-[#3498db] text-white p-[15px] rounded-[5px] mb-[20px] flex justify-between items-center">
-                <h2 className="text-xl font-bold">人员与报表管理后台</h2>
+                <h2 className="text-xl font-bold">后台管理 (Management)</h2>
                 <button onClick={() => setView('inspector-info')} className="bg-transparent border border-white text-white px-3 py-1 rounded hover:bg-white hover:text-[#3498db]">
                     返回首页
                 </button>
@@ -480,46 +614,119 @@ const App: React.FC = () => {
                 </div>
             </div>
 
-            <div className="flex flex-col md:flex-row gap-4">
-                <div className="w-full md:w-1/3 bg-gray-50 p-4 rounded border">
-                    <h3 className="font-bold mb-3">人员管理 - 选择区域</h3>
-                    <div className="flex flex-col gap-2">
-                        {[{ key: 'vegetables', label: '蔬果区' }, { key: 'grocery', label: '食百区' }, { key: 'seafood', label: '水产区' }, { key: 'meat', label: '肉品区' }, { key: 'deli', label: '熟食区' }, { key: 'cashier', label: '收银区域' }].map(area => (
-                            <button key={area.key} onClick={() => setManageAreaKey(area.key)} className={`text-left p-3 rounded ${manageAreaKey === area.key ? 'bg-[#3498db] text-white' : 'bg-white hover:bg-gray-100'}`}>
-                                {area.label}
-                            </button>
-                        ))}
-                    </div>
+            {/* Configuration Management Tabs */}
+            <div className="bg-white p-4 rounded border shadow-sm">
+                <div className="flex border-b mb-4">
+                    <button 
+                        className={`px-4 py-2 font-bold ${manageTab === 'employees' ? 'text-[#3498db] border-b-2 border-[#3498db]' : 'text-gray-500'}`}
+                        onClick={() => setManageTab('employees')}
+                    >
+                        人员管理 (Employees)
+                    </button>
+                    <button 
+                        className={`px-4 py-2 font-bold ${manageTab === 'stores' ? 'text-[#3498db] border-b-2 border-[#3498db]' : 'text-gray-500'}`}
+                        onClick={() => setManageTab('stores')}
+                    >
+                        门店管理 (Stores)
+                    </button>
+                    <button 
+                        className={`px-4 py-2 font-bold ${manageTab === 'areas' ? 'text-[#3498db] border-b-2 border-[#3498db]' : 'text-gray-500'}`}
+                        onClick={() => setManageTab('areas')}
+                    >
+                        区域管理 (Areas)
+                    </button>
                 </div>
-                <div className="w-full md:w-2/3 bg-white p-4 rounded border">
-                    <h3 className="font-bold mb-3">管理 {manageAreaKey} 员工</h3>
-                    <div className="flex gap-2 mb-4">
-                        <input type="text" className="flex-1 p-2 border rounded" placeholder="输入员工姓名" value={newEmployeeName} onChange={(e) => setNewEmployeeName(e.target.value)} />
-                        <button onClick={handleAddEmployee} className="bg-[#27ae60] text-white px-4 py-2 rounded hover:bg-[#219653]">添加</button>
-                    </div>
-                    <div className="space-y-2">
-                        {(!employees[manageAreaKey] || employees[manageAreaKey].length === 0) && <p className="text-gray-400 italic">暂无员工 (请添加)</p>}
-                        {employees[manageAreaKey]?.map((name, idx) => (
-                            <div key={idx} className="flex justify-between items-center p-3 bg-gray-50 rounded border">
-                                <span>{name}</span>
-                                <button onClick={() => handleDeleteEmployee(name)} className="text-red-500 hover:text-red-700 font-bold">删除</button>
+
+                {manageTab === 'employees' && (
+                    <div className="flex flex-col md:flex-row gap-4">
+                        <div className="w-full md:w-1/3 bg-gray-50 p-4 rounded border space-y-4">
+                            <div>
+                                <label className="block font-bold mb-1">1. 选择门店</label>
+                                <select className="w-full p-2 border rounded" value={manageStore} onChange={(e) => setManageStore(e.target.value)}>
+                                    {appConfig.stores.map(s => <option key={s} value={s}>{s}</option>)}
+                                </select>
                             </div>
-                        ))}
+                            <div>
+                                <label className="block font-bold mb-1">2. 选择区域</label>
+                                <div className="flex flex-col gap-1 max-h-[300px] overflow-y-auto">
+                                    {appConfig.areas.map(area => (
+                                        <button 
+                                            key={area.key} 
+                                            onClick={() => setManageAreaKey(area.key)} 
+                                            className={`text-left p-2 rounded text-sm ${manageAreaKey === area.key ? 'bg-[#3498db] text-white' : 'bg-white hover:bg-gray-100 border'}`}
+                                        >
+                                            {area.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                        <div className="w-full md:w-2/3 bg-white p-4 rounded border">
+                            <h3 className="font-bold mb-3">管理 {manageStore} - {appConfig.areas.find(a => a.key === manageAreaKey)?.label} 员工</h3>
+                            <div className="flex gap-2 mb-4">
+                                <input type="text" className="flex-1 p-2 border rounded" placeholder="输入员工姓名" value={newItemName} onChange={(e) => setNewItemName(e.target.value)} />
+                                <button onClick={handleAddEmployee} className="bg-[#27ae60] text-white px-4 py-2 rounded hover:bg-[#219653]">添加</button>
+                            </div>
+                            <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                                {(!employees[manageStore] || !employees[manageStore][manageAreaKey] || employees[manageStore][manageAreaKey].length === 0) && <p className="text-gray-400 italic">暂无员工 (请添加)</p>}
+                                {employees[manageStore]?.[manageAreaKey]?.map((name, idx) => (
+                                    <div key={idx} className="flex justify-between items-center p-3 bg-gray-50 rounded border">
+                                        <span>{name}</span>
+                                        <button onClick={() => handleDeleteEmployee(name)} className="text-red-500 hover:text-red-700 font-bold">删除</button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
                     </div>
-                </div>
+                )}
+
+                {manageTab === 'stores' && (
+                    <div className="p-4">
+                        <h3 className="font-bold mb-3">门店列表</h3>
+                        <div className="flex gap-2 mb-4">
+                            <input type="text" className="flex-1 p-2 border rounded" placeholder="输入新门店名称" value={newItemName} onChange={(e) => setNewItemName(e.target.value)} />
+                            <button onClick={handleAddStore} className="bg-[#27ae60] text-white px-4 py-2 rounded hover:bg-[#219653]">添加门店</button>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                            {appConfig.stores.map((store, idx) => (
+                                <div key={idx} className="flex justify-between items-center p-3 bg-gray-50 rounded border">
+                                    <span className="font-bold">{store}</span>
+                                    {store !== '龙城店' && (
+                                        <button onClick={() => handleDeleteStore(store)} className="text-red-500 hover:text-red-700 text-sm">删除</button>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {manageTab === 'areas' && (
+                    <div className="p-4">
+                        <h3 className="font-bold mb-3">区域列表 (全局配置)</h3>
+                        <div className="flex gap-2 mb-4">
+                            <input type="text" className="flex-1 p-2 border rounded" placeholder="输入新区域名称" value={newItemName} onChange={(e) => setNewItemName(e.target.value)} />
+                            <button onClick={handleAddArea} className="bg-[#27ae60] text-white px-4 py-2 rounded hover:bg-[#219653]">添加区域</button>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {appConfig.areas.map((area, idx) => (
+                                <div key={idx} className="flex justify-between items-center p-3 bg-gray-50 rounded border">
+                                    <div>
+                                        <div className="font-bold">{area.label}</div>
+                                        <div className="text-xs text-gray-400">Key: {area.key}</div>
+                                    </div>
+                                    <button onClick={() => handleDeleteArea(area)} className="text-red-500 hover:text-red-700 text-sm">删除</button>
+                                </div>
+                            ))}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-4">* 注意: 新增区域默认使用通用检查标准，如需定制标准请联系管理员。</p>
+                    </div>
+                )}
             </div>
         </div>
     );
 
     const renderAreaSelection = () => {
-        const areaOptions = [
-            { key: 'vegetables', label: '蔬果区', sub: 'Vegetables & Fruits' },
-            { key: 'grocery', label: '食百区', sub: 'Food & Grocery' },
-            { key: 'seafood', label: '水产区', sub: 'SeaFood' },
-            { key: 'meat', label: '肉品区', sub: 'Meat' },
-            { key: 'deli', label: '熟食区', sub: 'Deli' },
-            { key: 'cashier', label: '收银区域', sub: 'Cashier' }
-        ];
+        const areaOptions = appConfig.areas;
         return (
             <div id="area-selection-page">
                 <div className="bg-[#3498db] text-white p-[15px] rounded-[5px] mb-[20px] relative">
@@ -532,7 +739,9 @@ const App: React.FC = () => {
                     </button>
                     
                     <h2 className="text-center text-xl font-bold">检查区域选择</h2>
-                    <p className="text-center mt-2 font-mono text-sm">月份: {selectedMonth} | 已同步记录: {isLoading ? '加载中...' : inspectionData.records.length}条</p>
+                    <p className="text-center mt-2 font-mono text-sm">
+                        门店: {inspectionData.shop} | 月份: {selectedMonth}
+                    </p>
                 </div>
                 
                 <div className="max-w-md mx-auto bg-white p-6 rounded shadow-sm border border-gray-200">
@@ -541,7 +750,7 @@ const App: React.FC = () => {
                         <select className="w-full p-3 border border-gray-300 rounded bg-white" value={selectionAreaKey} onChange={(e) => { setSelectionAreaKey(e.target.value); setSelectionEmployee(''); }}>
                             <option value="">-- 请选择 --</option>
                             {areaOptions.map(opt => {
-                                const count = inspectionData.records.filter(r => r.areaKey === opt.key).length;
+                                const count = inspectionData.records.filter(r => r.areaKey === opt.key && (r.shop === inspectionData.shop || (!r.shop && inspectionData.shop === '龙城店'))).length;
                                 return (<option key={opt.key} value={opt.key}>{opt.label} {count > 0 ? `(本月已检: ${count}次)` : ''}</option>);
                             })}
                         </select>
@@ -550,19 +759,22 @@ const App: React.FC = () => {
                         <label className="block mb-2 font-bold text-gray-700">2. 选择员工 (Select Employee)</label>
                         <select className="w-full p-3 border border-gray-300 rounded bg-white" value={selectionEmployee} onChange={(e) => setSelectionEmployee(e.target.value)} disabled={!selectionAreaKey}>
                             <option value="">-- 请选择 --</option>
-                            {selectionAreaKey && employees[selectionAreaKey]?.map((name, idx) => (<option key={idx} value={name}>{name}</option>))}
+                            {selectionAreaKey && employees[inspectionData.shop]?.[selectionAreaKey]?.map((name, idx) => (<option key={idx} value={name}>{name}</option>))}
                         </select>
                         {!isEmployeesLoaded && <p className="text-xs text-red-500 mt-1">正在等待员工名单同步...</p>}
+                        {isEmployeesLoaded && selectionAreaKey && (!employees[inspectionData.shop]?.[selectionAreaKey] || employees[inspectionData.shop]?.[selectionAreaKey].length === 0) && 
+                            <p className="text-xs text-orange-500 mt-1">该区域暂无员工，请联系管理员添加。</p>
+                        }
                     </div>
                     <button type="button" disabled={!selectionAreaKey || !selectionEmployee} className={`w-full py-3 px-4 rounded font-bold text-white transition-colors duration-300 ${(!selectionAreaKey || !selectionEmployee) ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#27ae60] hover:bg-[#219653] cursor-pointer'}`} onClick={handleEnterInspection}>
                         开始检查 (Start Inspection)
                     </button>
                 </div>
                 <div className="mt-8 border-t pt-6 pb-6">
-                    <h3 className="text-lg font-bold text-gray-700 mb-4 text-center">{selectedMonth} 月份检查记录 ({inspectionData.records.length})</h3>
-                    {isLoading ? (<p className="text-center text-gray-500">正在从云端同步数据...</p>) : inspectionData.records.length === 0 ? (<p className="text-center text-gray-400">该月份暂无检查记录</p>) : (
+                    <h3 className="text-lg font-bold text-gray-700 mb-4 text-center">{selectedMonth} 月份检查记录 ({inspectionData.records.filter(r => r.shop === inspectionData.shop || (!r.shop && inspectionData.shop === '龙城店')).length})</h3>
+                    {isLoading ? (<p className="text-center text-gray-500">正在从云端同步数据...</p>) : inspectionData.records.filter(r => r.shop === inspectionData.shop || (!r.shop && inspectionData.shop === '龙城店')).length === 0 ? (<p className="text-center text-gray-400">该门店本月暂无检查记录</p>) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {[...inspectionData.records].reverse().map((record) => (
+                            {[...inspectionData.records].filter(r => r.shop === inspectionData.shop || (!r.shop && inspectionData.shop === '龙城店')).reverse().map((record) => (
                                 <div key={record.id} className="p-4 rounded border bg-green-50 border-green-200 relative">
                                     <div className="font-bold">{record.name}</div>
                                     <div className="text-sm mt-1 text-gray-600">员工: <strong className="text-blue-600">{record.employee}</strong></div>
@@ -622,8 +834,11 @@ const App: React.FC = () => {
     };
 
     const renderResultsPage = () => {
+        // Filter records by current shop
+        const shopRecords = inspectionData.records.filter(r => r.shop === inspectionData.shop || (!r.shop && inspectionData.shop === '龙城店'));
+
         type AggregatedItem = { name?: string; areaKey: string; employee: string; totalScore: number; maxScore: number; count: number; deductions: Deduction[]; };
-        const aggregatedData = inspectionData.records.reduce<Record<string, AggregatedItem>>((acc, record) => {
+        const aggregatedData = shopRecords.reduce<Record<string, AggregatedItem>>((acc, record) => {
             const key = `${record.areaKey}_${record.employee}`;
             if (!acc[key]) acc[key] = { name: record.name, areaKey: record.areaKey, employee: record.employee || 'Unknown', totalScore: 0, maxScore: record.maxScore, count: 0, deductions: [] };
             acc[key].totalScore += record.score;
@@ -641,7 +856,7 @@ const App: React.FC = () => {
             <div id="results-page">
                 <div className="bg-[#3498db] text-white p-[15px] rounded-[5px] mb-[20px]">
                     <h2 className="text-center text-xl font-bold">{selectedMonth} 月份检查结果汇总</h2>
-                    <p className="text-center mt-2">数据来源: 云端数据库实时同步</p>
+                    <p className="text-center mt-2">门店: {inspectionData.shop}</p>
                 </div>
                 
                 <div className="flex justify-center items-center mb-6">
@@ -649,9 +864,9 @@ const App: React.FC = () => {
                     <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="p-2 border rounded" />
                 </div>
                 
-                {inspectionData.records.length === 0 ? (
+                {shopRecords.length === 0 ? (
                     <div className="text-center py-10 bg-gray-50 rounded border border-dashed border-gray-300">
-                        <p className="text-gray-500 text-lg">该月份 ({selectedMonth}) 暂无检查记录。</p>
+                        <p className="text-gray-500 text-lg">该门店 ({inspectionData.shop}) 在该月份 ({selectedMonth}) 暂无检查记录。</p>
                         <p className="text-sm text-gray-400 mt-2">请切换月份或返回进行新的检查。</p>
                     </div>
                 ) : (
@@ -685,7 +900,7 @@ const App: React.FC = () => {
                 )}
                 
                 <div className="text-center mt-[20px] pb-10">
-                    <button onClick={() => exportToExcel(inspectionData)} disabled={inspectionData.records.length === 0} className={`bg-[#27ae60] text-white px-4 py-2 rounded mr-4 ${inspectionData.records.length === 0 ? 'bg-gray-400 cursor-not-allowed' : ''}`}>导出本月报表 (Excel)</button>
+                    <button onClick={() => exportToExcel(inspectionData)} disabled={shopRecords.length === 0} className={`bg-[#27ae60] text-white px-4 py-2 rounded mr-4 ${shopRecords.length === 0 ? 'bg-gray-400 cursor-not-allowed' : ''}`}>导出本月报表 (Excel)</button>
                     <button onClick={handleBack} className="bg-[#7f8c8d] text-white px-4 py-2 rounded">返回</button>
                 </div>
             </div>

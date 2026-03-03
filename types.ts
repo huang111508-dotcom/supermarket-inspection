@@ -33,6 +33,7 @@ export interface AreaData {
 // New Interface for stored records
 export interface InspectionRecord extends AreaData {
     id: string; // Unique ID for the record (Firestore Doc ID)
+    shop: string; // Store name
     areaKey: string; // e.g., 'vegetables'
     timestamp: string; // ISO String
     monthStr: string; // e.g. "2023-10" for easy grouping
@@ -58,7 +59,14 @@ export interface InspectionData {
 }
 
 export type EmployeeConfig = {
-    [key: string]: string[];
+    [storeName: string]: {
+        [areaKey: string]: string[];
+    }
+}
+
+export interface AppConfig {
+    stores: string[];
+    areas: { key: string; label: string; }[];
 }
 
 export type ViewState = 'inspector-info' | 'area-selection' | 'inspection' | 'results' | 'management';
