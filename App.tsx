@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { InspectionData, ViewState, Deduction, EmployeeConfig, InspectionRecord, AppConfig } from './types';
+import { InspectionData, ViewState, Deduction, EmployeeConfig, InspectionRecord, AppConfig, Areas, Item, Standard } from './types';
 import { INITIAL_AREAS } from './data';
 import { exportToExcel } from './utils/excelExport';
 
@@ -45,9 +45,14 @@ const App: React.FC = () => {
             { key: 'seafood', label: '水产区' },
             { key: 'meat', label: '肉品区' },
             { key: 'deli', label: '熟食区' },
-            { key: 'cashier', label: '收银区域' }
+            { key: 'cashier', label: '收银区域' },
+            { key: 'bakery', label: '烘焙区' },
+            { key: 'frozen', label: '冻品区' },
+            { key: 'logistics', label: '后勤区' }
         ]
     });
+
+    const [areaDetails, setAreaDetails] = useState<Areas>(INITIAL_AREAS);
 
     const [employees, setEmployees] = useState<EmployeeConfig>({});
     const [isEmployeesLoaded, setIsEmployeesLoaded] = useState<boolean>(false);
@@ -69,9 +74,10 @@ const App: React.FC = () => {
     const [selectionEmployee, setSelectionEmployee] = useState<string>('');
 
     // For Management View
-    const [manageTab, setManageTab] = useState<'stores' | 'areas' | 'employees'>('employees');
+    const [manageTab, setManageTab] = useState<'stores' | 'areas' | 'employees' | 'content'>('employees');
     const [manageStore, setManageStore] = useState<string>('龙城店');
     const [manageAreaKey, setManageAreaKey] = useState<string>('vegetables');
+    const [contentAreaKey, setContentAreaKey] = useState<string>('vegetables');
     const [newItemName, setNewItemName] = useState<string>(''); // For adding stores/areas/employees
 
     // Month Selection
@@ -113,7 +119,20 @@ const App: React.FC = () => {
         const unsubscribe = onSnapshot(docRef, (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data() as AppConfig;
-                // Merge with defaults to ensure structure
+                
+                // Check for missing new areas
+                const existingKeys = new Set(data.areas.map(a => a.key));
+                const newAreasToAdd = [
+                    { key: 'bakery', label: '烘焙区' },
+                    { key: 'frozen', label: '冻品区' },
+                    { key: 'logistics', label: '后勤区' }
+                ].filter(a => !existingKeys.has(a.key));
+                
+                if (newAreasToAdd.length > 0) {
+                    const updatedAreas = [...data.areas, ...newAreasToAdd];
+                    updateDoc(docRef, { areas: updatedAreas });
+                }
+
                 setAppConfig(prev => ({
                     stores: data.stores || prev.stores,
                     areas: data.areas || prev.areas
@@ -121,6 +140,31 @@ const App: React.FC = () => {
             } else {
                 // Initialize if not exists
                 setDoc(docRef, appConfig);
+            }
+        });
+        return () => unsubscribe();
+    }, []);
+
+    // ** LOAD AREA DETAILS **
+    useEffect(() => {
+        const docRef = doc(db, "config", "area_details");
+        const unsubscribe = onSnapshot(docRef, (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data() as Areas;
+                setAreaDetails(data);
+                // Update inspectionData with new structure if we haven't started editing
+                // Or just update the structure but keep values? 
+                // For simplicity, we update the template.
+                // Note: This might reset form if it happens during editing.
+                // But since it's onSnapshot, it should be fine as it's mainly for initial load or remote updates.
+                setInspectionData(prev => ({
+                    ...prev,
+                    areas: JSON.parse(JSON.stringify(data))
+                }));
+            } else {
+                // Initialize with INITIAL_AREAS if not exists
+                setDoc(docRef, INITIAL_AREAS);
+                setAreaDetails(INITIAL_AREAS);
             }
         });
         return () => unsubscribe();
@@ -223,7 +267,10 @@ const App: React.FC = () => {
         
         setInspectionData(prev => {
             const newAreas = { ...prev.areas };
-            const freshArea = JSON.parse(JSON.stringify(INITIAL_AREAS[selectionAreaKey]));
+            // Use areaDetails for fresh copy, fallback to INITIAL_AREAS if not loaded yet
+            const sourceArea = areaDetails[selectionAreaKey] || INITIAL_AREAS[selectionAreaKey];
+            const freshArea = JSON.parse(JSON.stringify(sourceArea));
+            
             freshArea.employee = selectionEmployee;
             newAreas[selectionAreaKey] = freshArea;
             return { ...prev, areas: newAreas };
@@ -635,6 +682,12 @@ const App: React.FC = () => {
                     >
                         区域管理 (Areas)
                     </button>
+                    <button 
+                        className={`px-4 py-2 font-bold ${manageTab === 'content' ? 'text-[#3498db] border-b-2 border-[#3498db]' : 'text-gray-500'}`}
+                        onClick={() => setManageTab('content')}
+                    >
+                        检查内容 (Content)
+                    </button>
                 </div>
 
                 {manageTab === 'employees' && (
@@ -719,6 +772,154 @@ const App: React.FC = () => {
                             ))}
                         </div>
                         <p className="text-xs text-gray-500 mt-4">* 注意: 新增区域默认使用通用检查标准，如需定制标准请联系管理员。</p>
+                    </div>
+                )}
+
+                {manageTab === 'content' && (
+                    <div className="p-4">
+                        <div className="bg-gray-50 p-4 rounded border mb-6">
+                            <label className="block font-bold mb-2">选择要编辑的区域 (Select Area to Edit)</label>
+                            <select 
+                                className="w-full p-2 border rounded" 
+                                value={contentAreaKey} 
+                                onChange={(e) => setContentAreaKey(e.target.value)}
+                            >
+                                {appConfig.areas.map(area => (
+                                    <option key={area.key} value={area.key}>{area.label}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {areaDetails[contentAreaKey] && (
+                            <div className="space-y-6">
+                                <div className="flex justify-between items-center border-b pb-2">
+                                    <h3 className="font-bold text-lg">{areaDetails[contentAreaKey].name} - 检查项列表</h3>
+                                    <button 
+                                        onClick={() => {
+                                            const newItem = { name: "新检查项 (New Item)", standards: [] };
+                                            const updatedArea = { ...areaDetails[contentAreaKey], items: [...areaDetails[contentAreaKey].items, newItem] };
+                                            const updatedDetails = { ...areaDetails, [contentAreaKey]: updatedArea };
+                                            setAreaDetails(updatedDetails);
+                                            setDoc(doc(db, "config", "area_details"), updatedDetails);
+                                        }}
+                                        className="bg-[#27ae60] text-white px-3 py-1 rounded text-sm hover:bg-[#219653]"
+                                    >
+                                        + 添加检查项
+                                    </button>
+                                </div>
+
+                                {areaDetails[contentAreaKey].items.map((item: Item, itemIdx: number) => (
+                                    <div key={itemIdx} className="border rounded p-4 bg-white shadow-sm">
+                                        <div className="flex justify-between items-center mb-3 border-b pb-2">
+                                            <input 
+                                                className="font-bold text-lg border-b border-dashed border-gray-300 focus:border-[#3498db] outline-none w-full mr-4 bg-transparent"
+                                                value={item.name}
+                                                onChange={(e) => {
+                                                    const newItems = [...areaDetails[contentAreaKey].items];
+                                                    newItems[itemIdx] = { ...newItems[itemIdx], name: e.target.value };
+                                                    const updatedDetails = { ...areaDetails, [contentAreaKey]: { ...areaDetails[contentAreaKey], items: newItems } };
+                                                    setAreaDetails(updatedDetails);
+                                                }}
+                                                onBlur={() => setDoc(doc(db, "config", "area_details"), areaDetails)}
+                                            />
+                                            <button 
+                                                onClick={() => {
+                                                    if(!confirm('确定删除此检查项吗？')) return;
+                                                    const newItems = areaDetails[contentAreaKey].items.filter((_, i) => i !== itemIdx);
+                                                    const updatedDetails = { ...areaDetails, [contentAreaKey]: { ...areaDetails[contentAreaKey], items: newItems } };
+                                                    setAreaDetails(updatedDetails);
+                                                    setDoc(doc(db, "config", "area_details"), updatedDetails);
+                                                }}
+                                                className="text-red-500 hover:text-red-700 text-sm whitespace-nowrap px-2 py-1 border border-red-200 rounded hover:bg-red-50"
+                                            >
+                                                删除项
+                                            </button>
+                                        </div>
+
+                                        <div className="space-y-3 pl-2 md:pl-4">
+                                            {item.standards.map((std: Standard, stdIdx: number) => (
+                                                <div key={stdIdx} className="flex flex-col gap-2 p-3 bg-gray-50 rounded border border-gray-100 relative group hover:border-blue-200 transition-colors">
+                                                    <div className="flex gap-2 items-center">
+                                                        <span className="text-xs text-gray-400 w-6">#{stdIdx + 1}</span>
+                                                        <input 
+                                                            className="flex-1 border p-1 rounded text-sm focus:ring-1 focus:ring-blue-300 outline-none" 
+                                                            value={std.name} 
+                                                            placeholder="标准名称"
+                                                            onChange={(e) => {
+                                                                const newItems = [...areaDetails[contentAreaKey].items];
+                                                                const newStandards = [...newItems[itemIdx].standards];
+                                                                newStandards[stdIdx] = { ...newStandards[stdIdx], name: e.target.value };
+                                                                newItems[itemIdx] = { ...newItems[itemIdx], standards: newStandards };
+                                                                setAreaDetails({ ...areaDetails, [contentAreaKey]: { ...areaDetails[contentAreaKey], items: newItems } });
+                                                            }}
+                                                            onBlur={() => setDoc(doc(db, "config", "area_details"), areaDetails)}
+                                                        />
+                                                        <div className="flex items-center gap-1">
+                                                            <span className="text-xs text-gray-500">分值:</span>
+                                                            <input 
+                                                                className="w-12 border p-1 rounded text-sm text-center focus:ring-1 focus:ring-blue-300 outline-none" 
+                                                                type="number" 
+                                                                value={std.score} 
+                                                                placeholder="分"
+                                                                onChange={(e) => {
+                                                                    const val = Number(e.target.value);
+                                                                    const newItems = [...areaDetails[contentAreaKey].items];
+                                                                    const newStandards = [...newItems[itemIdx].standards];
+                                                                    newStandards[stdIdx] = { ...newStandards[stdIdx], score: val, maxScore: val };
+                                                                    newItems[itemIdx] = { ...newItems[itemIdx], standards: newStandards };
+                                                                    setAreaDetails({ ...areaDetails, [contentAreaKey]: { ...areaDetails[contentAreaKey], items: newItems } });
+                                                                }}
+                                                                onBlur={() => setDoc(doc(db, "config", "area_details"), areaDetails)}
+                                                            />
+                                                        </div>
+                                                        <button 
+                                                            onClick={() => {
+                                                                const newItems = [...areaDetails[contentAreaKey].items];
+                                                                const newStandards = newItems[itemIdx].standards.filter((_, i) => i !== stdIdx);
+                                                                newItems[itemIdx] = { ...newItems[itemIdx], standards: newStandards };
+                                                                const updatedDetails = { ...areaDetails, [contentAreaKey]: { ...areaDetails[contentAreaKey], items: newItems } };
+                                                                setAreaDetails(updatedDetails);
+                                                                setDoc(doc(db, "config", "area_details"), updatedDetails);
+                                                            }}
+                                                            className="text-red-400 hover:text-red-600 font-bold px-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                            title="删除标准"
+                                                        >
+                                                            ×
+                                                        </button>
+                                                    </div>
+                                                    <textarea 
+                                                        className="w-full border p-2 rounded text-xs text-gray-600 h-16 focus:ring-1 focus:ring-blue-300 outline-none resize-y"
+                                                        value={std.criteria}
+                                                        placeholder="扣分标准描述..."
+                                                        onChange={(e) => {
+                                                            const newItems = [...areaDetails[contentAreaKey].items];
+                                                            const newStandards = [...newItems[itemIdx].standards];
+                                                            newStandards[stdIdx] = { ...newStandards[stdIdx], criteria: e.target.value };
+                                                            newItems[itemIdx] = { ...newItems[itemIdx], standards: newStandards };
+                                                            setAreaDetails({ ...areaDetails, [contentAreaKey]: { ...areaDetails[contentAreaKey], items: newItems } });
+                                                        }}
+                                                        onBlur={() => setDoc(doc(db, "config", "area_details"), areaDetails)}
+                                                    />
+                                                </div>
+                                            ))}
+                                            <button 
+                                                onClick={() => {
+                                                    const newItems = [...areaDetails[contentAreaKey].items];
+                                                    const newStandard = { name: "新标准", score: 2, maxScore: 2, criteria: "扣分标准..." };
+                                                    newItems[itemIdx] = { ...newItems[itemIdx], standards: [...newItems[itemIdx].standards, newStandard] };
+                                                    const updatedDetails = { ...areaDetails, [contentAreaKey]: { ...areaDetails[contentAreaKey], items: newItems } };
+                                                    setAreaDetails(updatedDetails);
+                                                    setDoc(doc(db, "config", "area_details"), updatedDetails);
+                                                }}
+                                                className="text-[#3498db] text-sm hover:underline mt-2 flex items-center gap-1"
+                                            >
+                                                <span>+ 添加标准</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

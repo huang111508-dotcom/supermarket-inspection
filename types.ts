@@ -42,12 +42,6 @@ export interface InspectionRecord extends AreaData {
 
 export interface Areas {
     [key: string]: AreaData;
-    vegetables: AreaData;
-    grocery: AreaData;
-    seafood: AreaData;
-    meat: AreaData;
-    deli: AreaData;
-    cashier: AreaData;
 }
 
 export interface InspectionData {
