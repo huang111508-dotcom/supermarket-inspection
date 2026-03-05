@@ -78,6 +78,7 @@ const App: React.FC = () => {
     const [manageStore, setManageStore] = useState<string>('龙城店');
     const [manageAreaKey, setManageAreaKey] = useState<string>('vegetables');
     const [contentAreaKey, setContentAreaKey] = useState<string>('vegetables');
+    const [copySourceAreaKey, setCopySourceAreaKey] = useState<string>('');
     const [newItemName, setNewItemName] = useState<string>(''); // For adding stores/areas/employees
 
     // Month Selection
@@ -790,7 +791,7 @@ const App: React.FC = () => {
                             </select>
                         </div>
 
-                        {areaDetails[contentAreaKey] && (
+                        {areaDetails[contentAreaKey] ? (
                             <div className="space-y-6">
                                 <div className="flex justify-between items-center border-b pb-2">
                                     <h3 className="font-bold text-lg">{areaDetails[contentAreaKey].name} - 检查项列表</h3>
@@ -918,6 +919,61 @@ const App: React.FC = () => {
                                         </div>
                                     </div>
                                 ))}
+                            </div>
+                        ) : (
+                            <div className="bg-white p-8 rounded border border-dashed border-gray-300 text-center">
+                                <div className="text-gray-500 mb-4 text-lg">该区域暂无检查内容配置</div>
+                                <div className="flex flex-col md:flex-row justify-center gap-4 items-center">
+                                    <button 
+                                        onClick={() => {
+                                            const newArea = { 
+                                                name: appConfig.areas.find(a => a.key === contentAreaKey)?.label || contentAreaKey, 
+                                                items: [],
+                                                score: 0,
+                                                maxScore: 0,
+                                                completed: false,
+                                                deductions: [],
+                                                redLine: []
+                                            };
+                                            const updatedDetails = { ...areaDetails, [contentAreaKey]: newArea };
+                                            setAreaDetails(updatedDetails);
+                                            setDoc(doc(db, "config", "area_details"), updatedDetails);
+                                        }}
+                                        className="bg-[#3498db] text-white px-4 py-2 rounded hover:bg-[#2980b9]"
+                                    >
+                                        初始化为空白内容
+                                    </button>
+                                    
+                                    <div className="flex items-center gap-2 border-l pl-4 ml-2">
+                                        <span className="text-gray-600">或从其他区域复制:</span>
+                                        <select 
+                                            className="border p-2 rounded"
+                                            value={copySourceAreaKey}
+                                            onChange={(e) => setCopySourceAreaKey(e.target.value)}
+                                        >
+                                            <option value="">-- 选择源区域 --</option>
+                                            {Object.keys(areaDetails).map(key => (
+                                                <option key={key} value={key}>{areaDetails[key].name}</option>
+                                            ))}
+                                        </select>
+                                        <button 
+                                            onClick={() => {
+                                                if (!copySourceAreaKey) return;
+                                                const sourceArea = areaDetails[copySourceAreaKey];
+                                                const newArea = JSON.parse(JSON.stringify(sourceArea)); // Deep copy
+                                                newArea.name = appConfig.areas.find(a => a.key === contentAreaKey)?.label || contentAreaKey; // Reset name
+                                                
+                                                const updatedDetails = { ...areaDetails, [contentAreaKey]: newArea };
+                                                setAreaDetails(updatedDetails);
+                                                setDoc(doc(db, "config", "area_details"), updatedDetails);
+                                            }}
+                                            disabled={!copySourceAreaKey}
+                                            className={`px-4 py-2 rounded text-white ${!copySourceAreaKey ? 'bg-gray-300 cursor-not-allowed' : 'bg-[#27ae60] hover:bg-[#219653]'}`}
+                                        >
+                                            复制并初始化
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         )}
                     </div>
