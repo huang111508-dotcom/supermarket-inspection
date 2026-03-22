@@ -139,8 +139,22 @@ const App: React.FC = () => {
                     areas: data.areas || prev.areas
                 }));
             } else {
-                // Initialize if not exists
-                setDoc(docRef, appConfig);
+                // Initialize if not exists using a hardcoded default to avoid state closure issues
+                const defaultConfig: AppConfig = {
+                    stores: ['龙城店'],
+                    areas: [
+                        { key: 'vegetables', label: '蔬果区' },
+                        { key: 'grocery', label: '食百区' },
+                        { key: 'seafood', label: '水产区' },
+                        { key: 'meat', label: '肉品区' },
+                        { key: 'deli', label: '熟食区' },
+                        { key: 'cashier', label: '收银区域' },
+                        { key: 'bakery', label: '烘焙区' },
+                        { key: 'frozen', label: '冻品区' },
+                        { key: 'logistics', label: '后勤区' }
+                    ]
+                };
+                setDoc(docRef, defaultConfig);
             }
         });
         return () => unsubscribe();
