@@ -119,10 +119,12 @@ const App: React.FC = () => {
         const docRef = doc(db, "config", "app");
         const unsubscribe = onSnapshot(docRef, (docSnap) => {
             if (docSnap.exists()) {
-                const data = docSnap.data() as AppConfig;
+                const data = docSnap.data() as AppConfig | undefined;
+                if (!data) return;
                 
-                // Check for missing new areas
-                const existingKeys = new Set(data.areas.map(a => a.key));
+                // Check for missing new areas safely
+                const safeAreas = data.areas || [];
+                const existingKeys = new Set(safeAreas.map(a => a.key));
                 const newAreasToAdd = [
                     { key: 'bakery', label: '烘焙区' },
                     { key: 'frozen', label: '冻品区' },
@@ -130,8 +132,8 @@ const App: React.FC = () => {
                 ].filter(a => !existingKeys.has(a.key));
                 
                 if (newAreasToAdd.length > 0) {
-                    const updatedAreas = [...data.areas, ...newAreasToAdd];
-                    updateDoc(docRef, { areas: updatedAreas });
+                    const updatedAreas = [...safeAreas, ...newAreasToAdd];
+                    updateDoc(docRef, { areas: updatedAreas }).catch(e => console.error(e));
                 }
 
                 setAppConfig(prev => ({
@@ -155,6 +157,11 @@ const App: React.FC = () => {
                     ]
                 };
                 setDoc(docRef, defaultConfig);
+            }
+        }, (error) => {
+            console.error("Firebase config/app snapshot error:", error);
+            if (error.code === 'permission-denied') {
+                alert('数据库访问权限已被拒绝。这通常是因为 Firebase 测试模式的 30 天安全规则已过期。请登录 Firebase 控制台修改 Firestore Rules。');
             }
         });
         return () => unsubscribe();
@@ -180,6 +187,11 @@ const App: React.FC = () => {
                 // Initialize with INITIAL_AREAS if not exists
                 setDoc(docRef, INITIAL_AREAS);
                 setAreaDetails(INITIAL_AREAS);
+            }
+        }, (error) => {
+            console.error("Firebase area_details snapshot error:", error);
+            if (error.code === 'permission-denied') {
+                setSyncStatus('error');
             }
         });
         return () => unsubscribe();
@@ -1127,12 +1139,25 @@ const App: React.FC = () => {
             <div id="results-page">
                 <div className="bg-[#3498db] text-white p-[15px] rounded-[5px] mb-[20px]">
                     <h2 className="text-center text-xl font-bold">{selectedMonth} 月份检查结果汇总</h2>
-                    <p className="text-center mt-2">门店: {inspectionData.shop}</p>
                 </div>
                 
-                <div className="flex justify-center items-center mb-6">
-                    <label className="mr-2 font-bold">切换月份查看历史:</label>
-                    <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="p-2 border rounded" />
+                <div className="flex flex-col md:flex-row justify-center items-center mb-6 gap-4 bg-gray-50 p-4 rounded border">
+                    <div className="flex items-center">
+                        <label className="mr-2 font-bold whitespace-nowrap">查看门店:</label>
+                        <select 
+                            className="p-2 border rounded bg-white min-w-[200px]"
+                            value={inspectionData.shop}
+                            onChange={(e) => setInspectionData(prev => ({...prev, shop: e.target.value}))}
+                        >
+                            {appConfig.stores.map(store => (
+                                <option key={store} value={store}>{store}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div className="flex items-center">
+                        <label className="mr-2 font-bold whitespace-nowrap">切换月份:</label>
+                        <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="p-2 border rounded" />
+                    </div>
                 </div>
                 
                 {shopRecords.length === 0 ? (
