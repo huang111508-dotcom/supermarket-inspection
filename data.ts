@@ -8,7 +8,55 @@ export const INITIAL_EMPLOYEES: EmployeeConfig = {
         seafood: ["周八"],
         meat: ["吴九", "郑十"],
         deli: ["刘一"],
-        cashier: ["陈二", "林三"]
+        cashier: ["陈二", "林三"],
+        bakery: ["烘焙1", "烘焙2"],
+        frozen: ["冻品1", "冻品2"],
+        logistics: ["后勤1", "后勤2"]
+    },
+    '利雅得店': {
+        grocery: [
+            "董雯Wen Dong", "连诚", "成冉Ran Cheng", "Prakash普拉", "Raju拉柱", 
+            "MD EMRAN 伊木南", "Jawad贾瓦德", "Rabi拉毕", "MD Hafizur哈菲兹", 
+            "Rasel拉塞尔", "HASAN NEHEN哈桑尼赫", "Majed马济得", "Sirajul斯拉俊", 
+            "Rasel拉西尔", "JAHIDUL ISLAM 贾赫杜", "Samir萨秘尔", "MD. MORSALIN莫塞林"
+        ],
+        bakery: [
+            "韩雪英Xueying Han", "RAFID啦菲德", "SHEHERYAR谢赫亚尔", 
+            "MD Nazmul Hossen Rifat", "Ariful阿瑞夫", "ULLAH乌拉", 
+            "MEHRAN米赫冉", "SHAH沙哈", "FAIZAN法伊赞", "Ekram可冉"
+        ],
+        cashier: [
+            "Sarishma沙利斯马", "Afsarul阿福萨", "AL FAHIM 法赫姆", "KHAN汉", 
+            "Usama优撒玛", "REVIE瑞薇", "HASAN哈善", "EDIOLINA伊朱丽娜", 
+            "Catherine凯瑟琳", "Naif纳义夫", "Abdulrahman阿卜杜鲁赫曼", "Rasha拉莎", 
+            "Abdulaziz阿卜杜勒阿齐兹", "Ziyad齐亚德", "Rayan拉扬", "Adel阿迪尔"
+        ],
+        frozen: [
+            "Netra内特拉", "HAZRAT哈扎特", "SAGOR萨格尔", "Prasad普赛", "Aiman艾曼"
+        ],
+        deli: [
+            "Rakibul Hossain拉提布", "李进Jin Li", "胡文琴WenQin Hu", 
+            "Kedar可达", "Khokan Khan酷空汗", "Kashem卡希姆"
+        ],
+        meat: [
+            "Bahadur布哈多", "MD Moin沫音", "RAHMAN阿哈曼", "MD Islam艾斯兰", "SAHADAT萨哈丹"
+        ],
+        seafood: [
+            "汪峰", "MD Sagar撒格尔", "MAMUN玛牧恩", "MD RAKIB 迈德拉克布", "Fahim法希姆"
+        ],
+        logistics: [
+            "李静Jing Li", "郭敬楠 Jingnan Guo", "Abdul Moiz阿布杜莫兹", "Qaisar凯萨尔", 
+            "SHAHID ALI沙黑德阿里", "Rasel", "MD Rustam如斯塔", "MD MASUD PARVEZ  马苏", 
+            "MANIK马尼克", "MD SHAMIM迈德沙敏", "SAHADAT萨哈丹", "Durjoy都瑞均", 
+            "陈礼俐Lili Chen", "刘翔Xiang Liu", "陈曾武Zengwu Chen", "布虎万", 
+            "HAMAD哈迈德", "Sabbir萨比尔"
+        ],
+        vegetables: [
+            "Govinda戈文达", "Udhak Singh Saud沙乌迪", "Abbas阿巴什", "Mahmudur买哈穆度", 
+            "BABLU巴布鲁", "Shahadat沙哈达", "Hasan哈三", "Abdul Zahid哎布度", 
+            "MD Hriday哈瑞达", "MD Delwar迪拉瓦", "shafee沙费尔", "Kamrul卡鲁", 
+            "JUNAYET俊奈特", "MEHADI米海迪", "Kabin卡宾", "MD Sofiqul舒非孔", "Bilal毕拉尔"
+        ]
     }
 };
 

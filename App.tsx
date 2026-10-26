@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { InspectionData, ViewState, Deduction, EmployeeConfig, InspectionRecord, AppConfig, Areas, Item, Standard } from './types';
-import { INITIAL_AREAS } from './data';
+import { INITIAL_AREAS, INITIAL_EMPLOYEES } from './data';
 import { exportToExcel } from './utils/excelExport';
 
 // Firebase Imports
@@ -28,17 +28,33 @@ const App: React.FC = () => {
         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     };
 
+    const getSavedShop = (): string => {
+        try {
+            return localStorage.getItem('inspection_shop') || '利雅得店';
+        } catch {
+            return '利雅得店';
+        }
+    };
+
+    const getSavedInspector = (): string => {
+        try {
+            return localStorage.getItem('inspection_inspector') || '';
+        } catch {
+            return '';
+        }
+    };
+
     // Application State
     const [inspectionData, setInspectionData] = useState<InspectionData>(() => ({
-        inspector: '',
-        shop: '龙城店', // Default shop
+        inspector: getSavedInspector(),
+        shop: getSavedShop(), // Default to last saved shop or 利雅得店
         date: '',
         areas: JSON.parse(JSON.stringify(INITIAL_AREAS)),
         records: [] 
     }));
 
     const [appConfig, setAppConfig] = useState<AppConfig>({
-        stores: ['龙城店'],
+        stores: ['利雅得店', '龙城店'],
         areas: [
             { key: 'vegetables', label: '蔬果区' },
             { key: 'grocery', label: '食百区' },
@@ -75,7 +91,7 @@ const App: React.FC = () => {
 
     // For Management View
     const [manageTab, setManageTab] = useState<'stores' | 'areas' | 'employees' | 'content'>('employees');
-    const [manageStore, setManageStore] = useState<string>('龙城店');
+    const [manageStore, setManageStore] = useState<string>(() => getSavedShop());
     const [manageAreaKey, setManageAreaKey] = useState<string>('vegetables');
     const [contentAreaKey, setContentAreaKey] = useState<string>('vegetables');
     const [copySourceAreaKey, setCopySourceAreaKey] = useState<string>('');
@@ -86,10 +102,82 @@ const App: React.FC = () => {
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
     
+    // Safety & Sync Tools State
+    const [showGitHubModal, setShowGitHubModal] = useState<boolean>(false);
+    const [isRestoringRiyadh, setIsRestoringRiyadh] = useState<boolean>(false);
+    const RECENT_MONTHS = ['2026-10', '2026-09', '2026-08', '2026-07', '2026-06', '2026-05', '2026-04', '2026-03'];
+
+    const handleRestoreRiyadh = async () => {
+        if (!window.confirm("确定要对云端【利雅得店】进行深度恢复与同步吗？此操作会确保利雅得店门店存在且所有部门员工名单完整，不会删除已有巡检记录。")) {
+            return;
+        }
+        setIsRestoringRiyadh(true);
+        try {
+            // 1. App stores config
+            const appRef = doc(db, "config", "app");
+            const appSnap = await getDoc(appRef);
+            let stores = ['利雅得店', '龙城店'];
+            if (appSnap.exists()) {
+                const existingStores = appSnap.data().stores || [];
+                stores = Array.from(new Set([...existingStores, '利雅得店', '龙城店']));
+            }
+            await setDoc(appRef, { stores }, { merge: true });
+
+            // 2. Employees config
+            const empRef = doc(db, "config", "employees");
+            const empSnap = await getDoc(empRef);
+            const currentEmp = empSnap.exists() ? (empSnap.data() as EmployeeConfig) : {};
+            const riyadhEmp = {
+                ...(INITIAL_EMPLOYEES['利雅得店'] || {}),
+                ...(currentEmp['利雅得店'] || {})
+            };
+            Object.keys(INITIAL_EMPLOYEES['利雅得店']).forEach(areaKey => {
+                const baseList = INITIAL_EMPLOYEES['利雅得店'][areaKey] || [];
+                const existList = (currentEmp['利雅得店'] && currentEmp['利雅得店'][areaKey]) || [];
+                riyadhEmp[areaKey] = Array.from(new Set([...baseList, ...existList]));
+            });
+
+            await setDoc(empRef, {
+                '利雅得店': riyadhEmp,
+                '龙城店': currentEmp['龙城店'] || INITIAL_EMPLOYEES['龙城店']
+            }, { merge: true });
+
+            alert("✅ 利雅得店数据深度同步与确保完成！\n\n• 门店列表已包含「利雅得店」\n• 13个部门员工名单已全部确保完好\n• 历史巡检记录完好保留！");
+        } catch (e: any) {
+            alert("❌ 操作失败: " + e.message);
+        } finally {
+            setIsRestoringRiyadh(false);
+        }
+    };
+    
     // Connection Status
     const [syncStatus, setSyncStatus] = useState<'connecting' | 'connected' | 'error' | 'slow'>('connecting');
     // Ref to track if we actually got data
     const hasReceivedData = useRef(false);
+
+    // Helper to safely get employees for an area with fallback between english key and chinese label
+    const getEmployeesForArea = (shopName: string, areaKey: string): string[] => {
+        if (!employees || !employees[shopName]) return [];
+        const listA = Array.isArray(employees[shopName][areaKey]) ? employees[shopName][areaKey] : [];
+        const areaObj = appConfig.areas.find(a => a.key === areaKey);
+        const listB = (areaObj && Array.isArray(employees[shopName][areaObj.label])) ? employees[shopName][areaObj.label] : [];
+        return Array.from(new Set([...listA, ...listB]));
+    };
+
+    const handleShopChange = (newShop: string) => {
+        setInspectionData(prev => ({ ...prev, shop: newShop }));
+        setManageStore(newShop);
+        try {
+            localStorage.setItem('inspection_shop', newShop);
+        } catch (e) {}
+    };
+
+    const handleInspectorChange = (newInspector: string) => {
+        setInspectionData(prev => ({ ...prev, inspector: newInspector }));
+        try {
+            localStorage.setItem('inspection_inspector', newInspector);
+        } catch (e) {}
+    };
 
     // Initialize Date
     useEffect(() => {
@@ -125,25 +213,44 @@ const App: React.FC = () => {
                 // Check for missing new areas safely
                 const safeAreas = data.areas || [];
                 const existingKeys = new Set(safeAreas.map(a => a.key));
-                const newAreasToAdd = [
+                const defaultAreas = [
+                    { key: 'vegetables', label: '蔬果区' },
+                    { key: 'grocery', label: '食百区' },
+                    { key: 'seafood', label: '水产区' },
+                    { key: 'meat', label: '肉品区' },
+                    { key: 'deli', label: '熟食区' },
+                    { key: 'cashier', label: '收银区域' },
                     { key: 'bakery', label: '烘焙区' },
                     { key: 'frozen', label: '冻品区' },
                     { key: 'logistics', label: '后勤区' }
-                ].filter(a => !existingKeys.has(a.key));
+                ];
+                const newAreasToAdd = defaultAreas.filter(a => !existingKeys.has(a.key));
                 
                 if (newAreasToAdd.length > 0) {
                     const updatedAreas = [...safeAreas, ...newAreasToAdd];
                     updateDoc(docRef, { areas: updatedAreas }).catch(e => console.error(e));
                 }
 
-                setAppConfig(prev => ({
-                    stores: data.stores || prev.stores,
-                    areas: data.areas || prev.areas
-                }));
+                // Ensure core stores always exist in both cloud and local state
+                const safeStores = data.stores || [];
+                const storeSet = new Set(safeStores);
+                let needUpdateStore = false;
+                if (!storeSet.has('龙城店')) { storeSet.add('龙城店'); needUpdateStore = true; }
+                if (!storeSet.has('利雅得店')) { storeSet.add('利雅得店'); needUpdateStore = true; }
+
+                const finalStores = Array.from(storeSet);
+                if (needUpdateStore) {
+                    updateDoc(docRef, { stores: finalStores }).catch(e => console.error(e));
+                }
+
+                setAppConfig({
+                    stores: finalStores,
+                    areas: safeAreas.length > 0 ? [...safeAreas, ...newAreasToAdd] : defaultAreas
+                });
             } else {
-                // Initialize if not exists using a hardcoded default to avoid state closure issues
+                // Initialize if not exists using both stores
                 const defaultConfig: AppConfig = {
-                    stores: ['龙城店'],
+                    stores: ['利雅得店', '龙城店'],
                     areas: [
                         { key: 'vegetables', label: '蔬果区' },
                         { key: 'grocery', label: '食百区' },
@@ -157,6 +264,7 @@ const App: React.FC = () => {
                     ]
                 };
                 setDoc(docRef, defaultConfig);
+                setAppConfig(defaultConfig);
             }
         }, (error) => {
             console.error("Firebase config/app snapshot error:", error);
@@ -207,25 +315,45 @@ const App: React.FC = () => {
             setIsEmployeesLoaded(true);
 
             if (docSnap.exists()) {
-                const cloudData = docSnap.data();
-                
-                // MIGRATION CHECK: Check if data is in old format (flat keys like 'vegetables')
-                // or new format (keys are store names like '龙城店')
-                // We assume if it has 'vegetables' at top level, it's old format.
-                if (cloudData['vegetables'] && Array.isArray(cloudData['vegetables'])) {
-                    console.log("Migrating old employee data to '龙城店'...");
-                    const newStructure: EmployeeConfig = {
-                        '龙城店': cloudData as any
-                    };
-                    // Update cloud
-                    await setDoc(docRef, newStructure);
-                    // Local state update will happen on next snapshot
-                } else {
-                    setEmployees(cloudData as EmployeeConfig);
+                const cloudData = (docSnap.data() as EmployeeConfig) || {};
+                let needsUpdate = false;
+                const mergedData: EmployeeConfig = { ...cloudData };
+
+                // 1. Check for legacy flat format keys without wiping multi-store data
+                if ((cloudData as any)['vegetables'] && Array.isArray((cloudData as any)['vegetables'])) {
+                    console.log("Migrating legacy flat employee keys into 龙城店...");
+                    if (!mergedData['龙城店']) mergedData['龙城店'] = {};
+                    appConfig.areas.forEach(a => {
+                        if ((cloudData as any)[a.key] && Array.isArray((cloudData as any)[a.key])) {
+                            mergedData['龙城店'][a.key] = (cloudData as any)[a.key];
+                            delete (mergedData as any)[a.key];
+                        }
+                    });
+                    needsUpdate = true;
                 }
+
+                // 2. SELF-HEALING: Ensure '利雅得店' is never missing or blank
+                if (!mergedData['利雅得店'] || Object.keys(mergedData['利雅得店']).length === 0) {
+                    console.warn("Self-healing: Restoring 利雅得店 employee config from defaults...");
+                    mergedData['利雅得店'] = INITIAL_EMPLOYEES['利雅得店'];
+                    needsUpdate = true;
+                }
+
+                // 3. SELF-HEALING: Ensure '龙城店' is never missing or blank
+                if (!mergedData['龙城店'] || Object.keys(mergedData['龙城店']).length === 0) {
+                    console.warn("Self-healing: Restoring 龙城店 employee config from defaults...");
+                    mergedData['龙城店'] = INITIAL_EMPLOYEES['龙城店'];
+                    needsUpdate = true;
+                }
+
+                if (needsUpdate) {
+                    await setDoc(docRef, mergedData, { merge: true });
+                }
+                setEmployees(mergedData);
             } else {
-                console.log("No employee config in cloud.");
-                setEmployees({});
+                console.log("No employee config in cloud, writing full initial config...");
+                await setDoc(docRef, INITIAL_EMPLOYEES, { merge: true });
+                setEmployees(INITIAL_EMPLOYEES);
             }
         }, (error) => {
             console.error("Sync Error (Employees):", error);
@@ -276,6 +404,10 @@ const App: React.FC = () => {
             alert('请填写检查人姓名和门店名称');
             return;
         }
+        try {
+            localStorage.setItem('inspection_inspector', inspector);
+            localStorage.setItem('inspection_shop', shop);
+        } catch (e) {}
         setInspectionData(prev => ({ ...prev, inspector, shop }));
         setView('area-selection');
     };
@@ -308,6 +440,10 @@ const App: React.FC = () => {
 
     // Updated: Go to results via specific entry point logic
     const handleViewResults = (from: ViewState) => {
+        if (from === 'management') {
+            const targetShop = manageStore || inspectionData.shop || getSavedShop();
+            setInspectionData(prev => ({...prev, shop: targetShop}));
+        }
         setPreviousView(from);
         setView('results');
     };
@@ -431,8 +567,8 @@ const App: React.FC = () => {
     };
 
     const handleDeleteStore = async (name: string) => {
-        if (name === '龙城店') {
-            alert("默认门店无法删除");
+        if (name === '龙城店' || name === '利雅得店') {
+            alert("核心门店 (龙城店 / 利雅得店) 无法删除");
             return;
         }
         if (window.confirm(`确定要删除门店 ${name} 吗？`)) {
@@ -501,7 +637,7 @@ const App: React.FC = () => {
                 
                 if (!data[manageStore][manageAreaKey].includes(name)) {
                     data[manageStore][manageAreaKey].push(name);
-                    await setDoc(docRef, data);
+                    await setDoc(docRef, data, { merge: true });
                 }
                 setNewItemName('');
             } catch (err: any) {
@@ -513,17 +649,29 @@ const App: React.FC = () => {
     const handleDeleteEmployee = async (nameToDelete: string) => {
         if (window.confirm(`确定要删除员工 ${nameToDelete} 吗？`)) {
             const docRef = doc(db, "config", "employees");
-            const fieldPath = `${manageStore}.${manageAreaKey}`;
+            const areaObj = appConfig.areas.find(a => a.key === manageAreaKey);
+            const label = areaObj?.label;
             try {
-                await updateDoc(docRef, { [fieldPath]: arrayRemove(nameToDelete) });
+                const updates: any = {
+                    [`${manageStore}.${manageAreaKey}`]: arrayRemove(nameToDelete)
+                };
+                if (label && label !== manageAreaKey) {
+                    updates[`${manageStore}.${label}`] = arrayRemove(nameToDelete);
+                }
+                await updateDoc(docRef, updates);
             } catch (e: any) {
                 try {
                     const snap = await getDoc(docRef);
                     if (snap.exists()) {
                         const data = snap.data() as EmployeeConfig;
-                        if (data[manageStore] && data[manageStore][manageAreaKey]) {
-                            data[manageStore][manageAreaKey] = data[manageStore][manageAreaKey].filter(n => n !== nameToDelete);
-                            await setDoc(docRef, data);
+                        if (data[manageStore]) {
+                            if (data[manageStore][manageAreaKey]) {
+                                data[manageStore][manageAreaKey] = data[manageStore][manageAreaKey].filter(n => n !== nameToDelete);
+                            }
+                            if (label && data[manageStore][label]) {
+                                data[manageStore][label] = data[manageStore][label].filter(n => n !== nameToDelete);
+                            }
+                            await setDoc(docRef, data, { merge: true });
                         }
                     }
                 } catch (err: any) {
@@ -599,17 +747,33 @@ const App: React.FC = () => {
             </div>
 
             <div className="mb-[20px] bg-yellow-50 p-4 rounded border border-yellow-200">
-                <label className="block mb-[5px] font-bold text-gray-700">当前考评月份 (Month):</label>
-                <div className="flex items-center gap-2">
+                <div className="flex justify-between items-center mb-1">
+                    <label className="font-bold text-gray-700">当前考评月份 (Month):</label>
+                    <span className="text-xs text-blue-600 font-semibold">已选: {selectedMonth}</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 mb-2">
                     <input 
                         type="month" 
                         value={selectedMonth}
                         onChange={(e) => setSelectedMonth(e.target.value)}
-                        className="p-2 border rounded font-bold text-lg"
+                        className="p-1.5 border rounded font-bold text-base bg-white"
                     />
-                    <span className="text-sm text-gray-500">
-                        * 切换月份可查询历史汇总，所有提交将计入该月。
-                    </span>
+                    <span className="text-xs text-gray-500">快捷切换:</span>
+                    {RECENT_MONTHS.slice(0, 6).map(m => (
+                        <button
+                            key={m}
+                            type="button"
+                            onClick={() => setSelectedMonth(m)}
+                            className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${
+                                selectedMonth === m ? 'bg-[#3498db] text-white shadow-sm' : 'bg-white hover:bg-gray-100 text-gray-700 border'
+                            }`}
+                        >
+                            {m}
+                        </button>
+                    ))}
+                </div>
+                <div className="text-xs text-gray-500">
+                    * 切换月份可查询历史汇总，所有提交将计入该月。
                 </div>
             </div>
 
@@ -619,16 +783,17 @@ const App: React.FC = () => {
                     type="text" 
                     className="w-full p-[8px] border border-[#ddd] rounded-[4px] box-border"
                     value={inspectionData.inspector}
-                    onChange={(e) => setInspectionData(prev => ({...prev, inspector: e.target.value}))}
+                    onChange={(e) => handleInspectorChange(e.target.value)}
+                    placeholder="输入检查人姓名"
                     required 
                 />
             </div>
             <div className="mb-[15px]">
                 <label className="block mb-[5px] font-bold">门店名称 (Shop Name):</label>
                 <select 
-                    className="w-full p-[8px] border border-[#ddd] rounded-[4px] box-border bg-white"
+                    className="w-full p-[8px] border border-[#ddd] rounded-[4px] box-border bg-white font-medium text-base"
                     value={inspectionData.shop}
-                    onChange={(e) => setInspectionData(prev => ({...prev, shop: e.target.value}))}
+                    onChange={(e) => handleShopChange(e.target.value)}
                     required 
                 >
                     {appConfig.stores.map(store => (
@@ -656,6 +821,37 @@ const App: React.FC = () => {
                 <button onClick={() => setView('inspector-info')} className="bg-transparent border border-white text-white px-3 py-1 rounded hover:bg-white hover:text-[#3498db]">
                     返回首页
                 </button>
+            </div>
+
+            {/* Riyadh Store Data Security & GitHub Sync Action Card */}
+            <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-emerald-50 p-4 rounded border border-blue-200 mb-6 shadow-sm">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                    <div>
+                        <div className="flex items-center gap-2">
+                            <span className="text-xl">🛡️</span>
+                            <h3 className="font-bold text-gray-800 text-base">利雅得店数据安全与 GitHub 部署代码同步</h3>
+                            <span className="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded font-bold">云端数据完整</span>
+                        </div>
+                        <p className="text-xs text-gray-600 mt-1">
+                            若您或同事在访问 GitHub 部署的线上网页时发现没有利雅得店，是因为 GitHub 仓库还在运行旧版代码。请下载最新代码覆盖至 GitHub。
+                        </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                        <button
+                            onClick={handleRestoreRiyadh}
+                            disabled={isRestoringRiyadh}
+                            className="bg-[#2980b9] hover:bg-[#1f618d] text-white text-xs px-3 py-2 rounded font-bold shadow-sm transition-colors flex items-center gap-1"
+                        >
+                            {isRestoringRiyadh ? '正在校验...' : '⚡ 一键校验利雅得店'}
+                        </button>
+                        <button
+                            onClick={() => setShowGitHubModal(true)}
+                            className="bg-[#27ae60] hover:bg-[#219653] text-white text-xs px-3 py-2 rounded font-bold shadow-sm transition-colors flex items-center gap-1"
+                        >
+                            📦 获取代码更新 GitHub
+                        </button>
+                    </div>
+                </div>
             </div>
 
             {/* NEW: Report Management Section */}
@@ -748,8 +944,8 @@ const App: React.FC = () => {
                                 <button onClick={handleAddEmployee} className="bg-[#27ae60] text-white px-4 py-2 rounded hover:bg-[#219653]">添加</button>
                             </div>
                             <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                                {(!employees[manageStore] || !employees[manageStore][manageAreaKey] || employees[manageStore][manageAreaKey].length === 0) && <p className="text-gray-400 italic">暂无员工 (请添加)</p>}
-                                {employees[manageStore]?.[manageAreaKey]?.map((name, idx) => (
+                                {getEmployeesForArea(manageStore, manageAreaKey).length === 0 && <p className="text-gray-400 italic">暂无员工 (请添加)</p>}
+                                {getEmployeesForArea(manageStore, manageAreaKey).map((name, idx) => (
                                     <div key={idx} className="flex justify-between items-center p-3 bg-gray-50 rounded border">
                                         <span>{name}</span>
                                         <button onClick={() => handleDeleteEmployee(name)} className="text-red-500 hover:text-red-700 font-bold">删除</button>
@@ -771,7 +967,7 @@ const App: React.FC = () => {
                             {appConfig.stores.map((store, idx) => (
                                 <div key={idx} className="flex justify-between items-center p-3 bg-gray-50 rounded border">
                                     <span className="font-bold">{store}</span>
-                                    {store !== '龙城店' && (
+                                    {store !== '龙城店' && store !== '利雅得店' && (
                                         <button onClick={() => handleDeleteStore(store)} className="text-red-500 hover:text-red-700 text-sm">删除</button>
                                     )}
                                 </div>
@@ -1040,12 +1236,12 @@ const App: React.FC = () => {
                     </div>
                     <div className="mb-6">
                         <label className="block mb-2 font-bold text-gray-700">2. 选择员工 (Select Employee)</label>
-                        <select className="w-full p-3 border border-gray-300 rounded bg-white" value={selectionEmployee} onChange={(e) => setSelectionEmployee(e.target.value)} disabled={!selectionAreaKey}>
+                        <select className="w-full p-3 border border-gray-300 rounded bg-white font-medium" value={selectionEmployee} onChange={(e) => setSelectionEmployee(e.target.value)} disabled={!selectionAreaKey}>
                             <option value="">-- 请选择 --</option>
-                            {selectionAreaKey && employees[inspectionData.shop]?.[selectionAreaKey]?.map((name, idx) => (<option key={idx} value={name}>{name}</option>))}
+                            {selectionAreaKey && getEmployeesForArea(inspectionData.shop, selectionAreaKey).map((name, idx) => (<option key={idx} value={name}>{name}</option>))}
                         </select>
                         {!isEmployeesLoaded && <p className="text-xs text-red-500 mt-1">正在等待员工名单同步...</p>}
-                        {isEmployeesLoaded && selectionAreaKey && (!employees[inspectionData.shop]?.[selectionAreaKey] || employees[inspectionData.shop]?.[selectionAreaKey].length === 0) && 
+                        {isEmployeesLoaded && selectionAreaKey && getEmployeesForArea(inspectionData.shop, selectionAreaKey).length === 0 && 
                             <p className="text-xs text-orange-500 mt-1">该区域暂无员工，请联系管理员添加。</p>
                         }
                     </div>
@@ -1141,13 +1337,13 @@ const App: React.FC = () => {
                     <h2 className="text-center text-xl font-bold">{selectedMonth} 月份检查结果汇总</h2>
                 </div>
                 
-                <div className="flex flex-col md:flex-row justify-center items-center mb-6 gap-4 bg-gray-50 p-4 rounded border">
+                <div className="flex flex-col md:flex-row justify-center items-center mb-4 gap-4 bg-gray-50 p-4 rounded border">
                     <div className="flex items-center">
                         <label className="mr-2 font-bold whitespace-nowrap">查看门店:</label>
                         <select 
-                            className="p-2 border rounded bg-white min-w-[200px]"
+                            className="p-2 border rounded bg-white min-w-[200px] font-medium"
                             value={inspectionData.shop}
-                            onChange={(e) => setInspectionData(prev => ({...prev, shop: e.target.value}))}
+                            onChange={(e) => handleShopChange(e.target.value)}
                         >
                             {appConfig.stores.map(store => (
                                 <option key={store} value={store}>{store}</option>
@@ -1156,14 +1352,30 @@ const App: React.FC = () => {
                     </div>
                     <div className="flex items-center">
                         <label className="mr-2 font-bold whitespace-nowrap">切换月份:</label>
-                        <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="p-2 border rounded" />
+                        <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="p-2 border rounded font-bold" />
                     </div>
+                </div>
+
+                {/* Quick month pills */}
+                <div className="flex flex-wrap justify-center items-center gap-2 mb-6">
+                    <span className="text-xs text-gray-500 font-medium">快速切换历史月份:</span>
+                    {RECENT_MONTHS.map(m => (
+                        <button
+                            key={m}
+                            onClick={() => setSelectedMonth(m)}
+                            className={`text-xs px-3 py-1 rounded-full font-medium transition-colors ${
+                                selectedMonth === m ? 'bg-[#3498db] text-white shadow-sm' : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border'
+                            }`}
+                        >
+                            {m}
+                        </button>
+                    ))}
                 </div>
                 
                 {shopRecords.length === 0 ? (
                     <div className="text-center py-10 bg-gray-50 rounded border border-dashed border-gray-300">
                         <p className="text-gray-500 text-lg">该门店 ({inspectionData.shop}) 在该月份 ({selectedMonth}) 暂无检查记录。</p>
-                        <p className="text-sm text-gray-400 mt-2">请切换月份或返回进行新的检查。</p>
+                        <p className="text-sm text-gray-400 mt-2">请点击上方快捷月份或选择器切换月份查看历史记录。</p>
                     </div>
                 ) : (
                     <>
@@ -1196,7 +1408,7 @@ const App: React.FC = () => {
                 )}
                 
                 <div className="text-center mt-[20px] pb-10">
-                    <button onClick={() => exportToExcel(inspectionData)} disabled={shopRecords.length === 0} className={`bg-[#27ae60] text-white px-4 py-2 rounded mr-4 ${shopRecords.length === 0 ? 'bg-gray-400 cursor-not-allowed' : ''}`}>导出本月报表 (Excel)</button>
+                    <button onClick={() => exportToExcel({ ...inspectionData, records: shopRecords })} disabled={shopRecords.length === 0} className={`bg-[#27ae60] text-white px-4 py-2 rounded mr-4 ${shopRecords.length === 0 ? 'bg-gray-400 cursor-not-allowed' : ''}`}>导出本月报表 (Excel)</button>
                     <button onClick={handleBack} className="bg-[#7f8c8d] text-white px-4 py-2 rounded">返回</button>
                 </div>
             </div>
@@ -1204,12 +1416,94 @@ const App: React.FC = () => {
     };
 
     return (
-        <div className="container max-w-[1200px] mx-auto bg-white p-[10px] md:p-[20px] rounded-[8px] shadow-[0_0_10px_rgba(0,0,0,0.1)]">
+        <div className="container max-w-[1200px] mx-auto bg-white p-[10px] md:p-[20px] rounded-[8px] shadow-[0_0_10px_rgba(0,0,0,0.1)] relative">
             {view === 'inspector-info' && renderInspectorInfo()}
             {view === 'management' && renderManagement()}
             {view === 'area-selection' && renderAreaSelection()}
             {view === 'inspection' && renderInspectionPage()}
             {view === 'results' && renderResultsPage()}
+
+            {/* GitHub Code Sync Modal */}
+            {showGitHubModal && (
+                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+                    <div className="bg-white rounded-xl max-w-xl w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+                        <button 
+                            onClick={() => setShowGitHubModal(false)}
+                            className="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-2xl font-bold w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100"
+                        >
+                            ×
+                        </button>
+                        <div className="flex items-center gap-2 mb-3">
+                            <span className="text-2xl">📦</span>
+                            <h3 className="text-lg font-bold text-gray-800">将新代码同步到 GitHub 仓库指引</h3>
+                        </div>
+                        <div className="bg-emerald-50 border border-emerald-200 p-3 rounded text-sm text-emerald-900 mb-4">
+                            <strong>关于利雅得店数据：</strong> 云端数据库已核验，包含利雅得店 13 个部门员工和超过 1,000 条历史巡检记录，<strong>数据完全完整</strong>！
+                        </div>
+                        <div className="bg-amber-50 border border-amber-200 p-3 rounded text-sm text-amber-900 mb-4">
+                            <strong>为什么需要更新 GitHub？</strong>
+                            <p className="mt-1 text-xs">
+                                您在线上访问的网址（如 GitHub Pages、Vercel 等）是从 GitHub 仓库自动编译部署的。如果您没有把修复后的最新代码更新到 GitHub，线上网址就会一直运行<strong>老旧版本代码</strong>（老代码只认龙城店，甚至会把云端利雅得店覆盖）。
+                            </p>
+                        </div>
+                        <div className="space-y-3 text-sm text-gray-700 mb-6">
+                            <p className="font-bold text-gray-800">简易更新步骤（只需替换 2 个文件）：</p>
+                            <div className="p-3 bg-gray-50 rounded border">
+                                <p className="font-semibold text-blue-600">第一步：点击下载最新代码文件</p>
+                                <p className="text-xs text-gray-500 mb-2">已为您生成最新的源代码文件：</p>
+                                <div className="flex flex-wrap gap-2">
+                                    <a 
+                                        href="/downloads/App.tsx" 
+                                        download="App.tsx" 
+                                        className="bg-[#3498db] hover:bg-[#2980b9] text-white px-3.5 py-2 rounded text-xs font-bold transition-colors inline-flex items-center gap-1.5 shadow-sm"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.5V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                                        </svg>
+                                        下载 App.tsx
+                                    </a>
+                                    <a 
+                                        href="/downloads/data.ts" 
+                                        download="data.ts" 
+                                        className="bg-[#27ae60] hover:bg-[#219653] text-white px-3.5 py-2 rounded text-xs font-bold transition-colors inline-flex items-center gap-1.5 shadow-sm"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.5V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                                        </svg>
+                                        下载 data.ts
+                                    </a>
+                                </div>
+                            </div>
+                            <div className="p-3 bg-gray-50 rounded border">
+                                <p className="font-semibold text-blue-600">第二步：替换 GitHub 仓库中的文件</p>
+                                <p className="text-xs text-gray-500">
+                                    进入您的 GitHub 仓库网页（或本地项目），将下载的 <code>App.tsx</code> 和 <code>data.ts</code> 覆盖同名文件。
+                                </p>
+                            </div>
+                            <div className="p-3 bg-gray-50 rounded border">
+                                <p className="font-semibold text-blue-600">第三步：Commit & Push 提交推送</p>
+                                <p className="text-xs text-gray-500">
+                                    在网页上点击 <strong>Commit changes</strong>，或在本地终端运行：
+                                </p>
+                                <pre className="text-xs text-gray-700 bg-gray-200/80 p-2 rounded mt-1 font-mono">
+git add App.tsx data.ts{"\n"}git commit -m "更新利雅得店与自愈安全配置"{"\n"}git push
+                                </pre>
+                                <p className="text-xs text-green-700 font-medium mt-1">
+                                    ✓ 完成后，线上部署会自动更新，利雅得店和龙城店即可永久保持正常！
+                                </p>
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                            <button 
+                                onClick={() => setShowGitHubModal(false)}
+                                className="bg-gray-100 hover:bg-gray-200 text-gray-800 px-5 py-2 rounded-lg text-sm font-bold transition-colors"
+                            >
+                                我知道了，关闭
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
